@@ -17,7 +17,7 @@
  "Pengaturan": {
   "Data mulai / Data sampai": "Rentang data yang dipakai model. Isi Data sampai lebih awal dari data terakhir untuk uji coba: hasil proyeksi akan dibandingkan dengan data aktual sesudahnya.",
   "Proyeksi sampai": "Periode terakhir yang ingin diproyeksi.",
-  "Penanda pandemi": "Tanda khusus (dummy) untuk periode pandemi 2020 dan pemulihan 2021, supaya guncangan itu tidak dianggap pola normal.",
+  "Penanda pandemi": "Tanda khusus (dummy) untuk masa kontraksi pandemi, supaya guncangan itu tidak dianggap pola normal. Periode bisa diatur per bulan; triwulan yang hanya sebagian masuk periode diberi bobot sesuai porsi bulannya.",
   "Efek Ramadan dan Lebaran": "Menghitung porsi hari puasa dan libur Lebaran (H-10 s.d. H+7) serta Idul Adha di tiap triwulan, sehingga model tahu saat Lebaran berpindah triwulan.",
   "Bersihkan outlier": "Nilai indikator pendukung yang terlalu ekstrem dipangkas ke batas wajar (winsorize). Target tidak diubah.",
   "Outlier": "Nilai yang jauh di luar kebiasaan data, misalnya lonjakan ratusan persen saat pemulihan pandemi.",
@@ -25,7 +25,17 @@
   "Selang kepercayaan": "Lebar rentang kemungkinan hasil proyeksi. 90% berarti angka aktual diperkirakan jatuh di dalam rentang dengan keyakinan 90%.",
   "Add-factor": "Penyesuaian manual dalam poin persen yoy untuk triwulan tertentu, berdasarkan judgment analis (misalnya efek HBKN atau Nataru). Berlaku untuk semua metode; hasil model murni tetap disimpan.",
   "Mode cepat": "Backtest dijalankan 6 kali (bukan 12) supaya lebih cepat. Cocok untuk coba-coba; untuk hasil final pakai mode lengkap.",
-  "Indikator VAR/BVAR": "Indikator yang ikut dimodelkan bersama target di metode VAR dan BVAR. Sebaiknya 1 s.d. 2 indikator yang paling berhubungan."
+  "Indikator VAR/BVAR": "Indikator yang ikut dimodelkan bersama target di metode VAR dan BVAR. Sebaiknya 1 s.d. 2 indikator yang paling berhubungan.",
+  "Masa pemulihan (rebound)": "Periode setelah pandemi ketika pertumbuhan yoy melonjak karena pembandingnya rendah (efek basis). Diberi tanda terpisah dari masa kontraksi.",
+  "Ramadan (puasa)": "Porsi hari puasa (bawaan 30 hari sebelum Idul Fitri) yang jatuh di tiap triwulan. Menangkap perubahan pola konsumsi selama Ramadan.",
+  "Lebaran (Idul Fitri)": "Porsi hari di sekitar Idul Fitri (bawaan H-10 s.d. H+7: mudik, belanja, libur, arus balik) yang jatuh di tiap triwulan.",
+  "Idul Adha": "Porsi hari di sekitar Idul Adha (hari raya kurban) yang jatuh di tiap triwulan. Bawaan hanya hari rayanya (H-0 s.d. H+0); jendela bisa diperlebar.",
+  "Penanganan outlier": "Pilih sendiri nilai indikator yang dianggap outlier. Pangkas = nilai dipotong ke batas wajar (median ± k × MAD). Hapus = nilai dikosongkan lalu diisi interpolasi. Target tidak diubah.",
+  "Batas outlier (k)": "Seberapa jauh dari median (dalam satuan MAD robust) sebuah nilai dianggap kemungkinan outlier. Makin kecil makin ketat; umumnya 3 s.d. 5.",
+  "Mode advanced": "Menampilkan pengaturan rinci tiap metode (order ARIMA, jumlah pohon Random Forest, dan lainnya). Bila tidak diubah, nilai bawaan dipakai.",
+  "Jumlah backtest": "Berapa kali model diuji mundur. Makin banyak makin kokoh, tapi lebih lama.",
+  "Kalender di model yoy": "Variabel kalender (dalam bentuk selisih yoy) ikut masuk ARIMA, ARIMAX, VAR, dan ML. Bawaan mati karena pada data DIY dan Babel backtest-nya memburuk.",
+  "Dummy triwulan di model yoy": "Menambah penanda Q1, Q2, Q3 di model yoy untuk menangkap kecenderungan yoy triwulan tertentu lebih tinggi. Bawaan mati."
  },
  "Metode": {
   "Naive": "Benchmark: proyeksi = pertumbuhan terakhir diulang terus. Pembanding paling sederhana; garis datar memang definisinya.",
@@ -43,7 +53,17 @@
   "Gradient Boosting": "Machine learning yang membangun pohon keputusan secara bertahap, tiap pohon memperbaiki kesalahan sebelumnya.",
   "SARIMA Musiman": "Mode level: SARIMA pada log PDRB level dengan komponen musiman triwulanan dan variabel kalender Lebaran.",
   "ETS Musiman": "Mode level: Holt-Winters pada log PDRB level. Default mati karena pola musiman berubah setelah pandemi.",
-  "Ensemble": "Gabungan metode non-benchmark. Bobot bawaan sesuai akurasi backtest (inverse-RMSE); bisa juga hanya N terbaik atau median."
+  "Ensemble": "Gabungan metode non-benchmark. Bobot bawaan sesuai akurasi backtest (inverse-RMSE); bisa juga hanya N terbaik atau median.",
+  "Order ARIMA maksimum": "Batas atas order AR (p) dan MA (q) yang dicoba. Model terbaik dipilih otomatis dengan AIC.",
+  "Tren ETS": "damped = tren melemah perlahan, linear = tren lurus, tanpa = datar.",
+  "Jumlah indikator ARIMAX": "Maksimal berapa indikator dengan korelasi terkuat yang dipakai ARIMAX.",
+  "Korelasi minimum ARIMAX": "Indikator dengan |korelasi| di bawah angka ini tidak dipakai ARIMAX.",
+  "Proyeksi indikator ARIMAX": "ar1 = indikator diproyeksi dengan AR(1) + dummy pandemi; rata2 = ditahan di rata-rata 4 triwulan terakhir.",
+  "Lag VAR maksimum": "Jumlah lag terbanyak yang dicoba VAR; lag terbaik dipilih otomatis dengan AIC.",
+  "Lag dan ketatan BVAR": "Lag = berapa triwulan ke belakang yang dipakai. Ketatan = seberapa kuat koefisien ditarik ke prior (makin kecil makin ketat).",
+  "Jumlah faktor PCA": "Berapa faktor bersama yang diambil dari semua indikator.",
+  "Parameter Random Forest": "Jumlah pohon (lebih banyak = lebih stabil, lebih lama), kedalaman maksimum (lebih dalam = lebih rumit), minimal data per daun (lebih besar = lebih halus).",
+  "Parameter Gradient Boosting": "Jumlah pohon, laju belajar (lebih kecil = lebih hati-hati, butuh lebih banyak pohon), dan kedalaman tiap pohon."
  },
  "Evaluasi dan metrik": {
   "Backtest": "Uji mundur: model dilatih dengan data sampai titik tertentu, lalu proyeksinya dicocokkan dengan data aktual sesudahnya. Diulang beberapa kali (bawaan 12).",

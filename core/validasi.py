@@ -121,15 +121,10 @@ def periksa(file_bytes):
         gaps = s.loc[fv:lv].isna().sum()
         if gaps:
             warnings.append({"lokasi": c, "pesan": f"Ada {gaps} sel kosong di tengah data. Akan diisi interpolasi."})
-        x = s.dropna()
-        if len(x) >= 8:
-            med = x.median(); mad = 1.4826 * (x - med).abs().median()
-            if mad > 0:
-                z = (x - med) / mad
-                out = z[z.abs() > 4]
-                if len(out):
-                    contoh = ", ".join(f"{p} ({x[p]:.2f})" for p in out.index[:3])
-                    warnings.append({"lokasi": c, "pesan": f"{len(out)} nilai jauh di luar kebiasaan (outlier), misalnya {contoh}. Untuk indikator pendukung akan dipangkas otomatis."})
+        out = deteksi_outlier(s)
+        if len(out):
+            contoh = ", ".join(f"{p} ({v:.2f})" for p, v in list(out.items())[:3])
+            warnings.append({"lokasi": c, "pesan": f"Kemungkinan ada outlier: {len(out)} nilai, misalnya {contoh}."})
     nmax = int(df.notna().sum().max())
     if nmax < MIN_OBS:
         errors.append({"lokasi": "Data", "pesan": f"Data terlalu pendek ({nmax} triwulan). Minimal {MIN_OBS} triwulan agar model bisa diuji."})
@@ -151,3 +146,16 @@ def tebak_pasangan_level(codes, df):
         if len(s) and (s > 0).all() and s.median() > 1000:
             cand.append(c)
     return cand
+
+
+def deteksi_outlier(s, batas=4.0):
+    """Nilai dengan |z robust| > batas (median dan MAD). Mengembalikan Series periode -> nilai."""
+    x = s.dropna()
+    if len(x) < 8:
+        return x.iloc[0:0]
+    med = x.median()
+    mad = 1.4826 * (x - med).abs().median()
+    if not mad > 0:
+        return x.iloc[0:0]
+    z = (x - med) / mad
+    return x[z.abs() > batas]

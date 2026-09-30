@@ -31,7 +31,17 @@ h1, h2, h3, h4 { font-family: 'Rubik', sans-serif !important; color: #1C2B33; }
 .eyebrow { font-size: 13px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #B83C0A; margin-bottom: -6px; }
 .kpi { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 14px 18px; }
 .kpi .l { font-size: 13px; font-weight: 700; color: #56636B; }
-.kpi .v { font-family: 'Rubik', sans-serif; font-size: 28px; font-weight: 700; color: #1C2B33; }
+.kpi, .kpi * { word-break: normal !important; overflow-wrap: normal !important; hyphens: none; }
+.kpi .l { line-height: 1.3; }
+.kpi .v { font-family: 'Rubik', sans-serif; font-size: clamp(20px, 2.1vw, 28px); font-weight: 700; color: #1C2B33; white-space: nowrap; }
+.kpi .s { line-height: 1.35; }
+/* pilihan dropdown boleh turun baris agar label panjang tetap terbaca */
+ul[role="listbox"] li, ul[role="listbox"] li * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; line-height: 1.35; }
+div[data-baseweb="popover"] ul[role="listbox"] { max-width: min(640px, 92vw); }
+[data-baseweb="select"] div[title] { text-overflow: ellipsis; }
+[data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+.ringkas { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 14px 18px; line-height: 1.55; }
+.ringkas b { color: #0F6B5C; }
 .kpi .s { font-size: 13px; color: #56636B; }
 .chip { display: inline-block; padding: 3px 10px; margin: 2px 4px 2px 0; border-radius: 999px; background: #F1E6D2; font-size: 13px; font-weight: 700; color: #1C2B33; }
 .msg-err { background: #FDECEA; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
@@ -136,6 +146,54 @@ def df_with_help(df, extra_help=None, **kw):
         elif str(c).startswith("Coverage CI"):
             cfg[c] = st.column_config.Column(help=g("Coverage CI"))
     st.dataframe(df, column_config=cfg, hide_index=True, use_container_width=True, **kw)
+
+
+GREY = "#C3CAD0"
+
+
+def chart_semua(series, ci, sorot, n_hist=12, height=420):
+    """Satu grafik besar: aktual (hitam), semua metode (abu-abu), metode terpilih (berwarna + selang kepercayaan)."""
+    d = series.rename(columns={series.columns[0]: "Periode"}).copy()
+    d["Periode"] = d["Periode"].astype(str)
+    hist = d[d["Aktual"].notna()].tail(n_hist)
+    if hist.empty:
+        return None
+    last = hist.iloc[-1]
+    fut = d[d["Aktual"].isna()]
+    metode = [c for c in d.columns if c not in ("Periode", "Aktual")]
+    rows = []
+    for m in metode:
+        rows.append({"Periode": last["Periode"], "Metode": m, "yoy": last["Aktual"]})
+        rows += [{"Periode": r["Periode"], "Metode": m, "yoy": r[m]} for _, r in fut.iterrows() if pd.notna(r[m])]
+    lp = pd.DataFrame(rows)
+    for x in (hist, lp):
+        x["t"] = pd.PeriodIndex(x["Periode"], freq="Q").to_timestamp()
+    xax = alt.X("t:T", title=None, axis=alt.Axis(format="%Y", tickCount="year", labelAngle=0))
+    vals = list(hist["Aktual"]) + list(lp["yoy"].dropna())
+    band = pd.DataFrame()
+    if ci is not None and len(ci):
+        band = ci[ci["Metode"] == sorot][["Periode", "Lower", "Upper"]].copy()
+        if len(band):
+            band = pd.concat([pd.DataFrame([{"Periode": last["Periode"], "Lower": last["Aktual"], "Upper": last["Aktual"]}]), band])
+            band["Periode"] = band["Periode"].astype(str)
+            band["t"] = pd.PeriodIndex(band["Periode"], freq="Q").to_timestamp()
+            vals += list(band["Lower"]) + list(band["Upper"])
+    y = alt.Scale(domain=[min(vals) - 0.3, max(vals) + 0.3])
+    tip = [alt.Tooltip("Metode:N"), alt.Tooltip("Periode:N"), alt.Tooltip("yoy:Q", title="yoy (%)", format=".2f")]
+    layers = []
+    if len(band):
+        layers.append(alt.Chart(band).mark_area(color=TEAL, opacity=0.14).encode(x=xax, y=alt.Y("Lower:Q", scale=y, title="% yoy"), y2="Upper:Q"))
+    layers.append(alt.Chart(lp[lp["Metode"] != sorot]).mark_line(color=GREY, strokeWidth=1.4, opacity=0.9).encode(
+        x=xax, y=alt.Y("yoy:Q", scale=y, title="% yoy"), detail="Metode:N", tooltip=tip))
+    layers.append(alt.Chart(lp[lp["Metode"] != sorot]).mark_point(color=GREY, size=18, filled=True).encode(
+        x=xax, y=alt.Y("yoy:Q", scale=y), detail="Metode:N", tooltip=tip))
+    layers.append(alt.Chart(hist.assign(Metode="Aktual", yoy=hist["Aktual"])).mark_line(
+        color=INK, strokeWidth=2.5, point=alt.OverlayMarkDef(color=INK, size=36)).encode(x=xax, y=alt.Y("yoy:Q", scale=y), tooltip=tip))
+    layers.append(alt.Chart(lp[lp["Metode"] == sorot]).mark_line(
+        color=CORAL if sorot in ("Naive", "Rata-rata 8Q") else TEAL, strokeWidth=3.5,
+        point=alt.OverlayMarkDef(color=CORAL if sorot in ("Naive", "Rata-rata 8Q") else TEAL, size=60)).encode(
+        x=xax, y=alt.Y("yoy:Q", scale=y), tooltip=tip))
+    return alt.layer(*layers).properties(height=height)
 
 
 def chart_bobot(bobot):

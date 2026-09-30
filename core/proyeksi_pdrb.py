@@ -97,6 +97,9 @@ KUANTIL_BATAS       = 90            # persentil untuk "otomatis" (90 = hanya 10%
 PAKAI_DUMMY_PANDEMI = True
 PERIODE_PANDEMI     = ("2020Q1", "2020Q4")   # periode kontraksi
 PERIODE_REBOUND     = ("2021Q2", "2021Q4")   # periode rebound (efek basis rendah)
+PAKAI_REBOUND       = True
+# Periode boleh ditulis per triwulan ("2020Q1") atau per bulan ("2020-03"). Bila per bulan, triwulan yang
+# hanya sebagian masuk periode diberi bobot sesuai porsi bulannya (mis. Maret saja = 1/3).
 
 # ---- 7. Efek musiman: kalender Islam (Ramadan, Lebaran, Idul Adha) & HBKN/Nataru ----------
 PAKAI_EFEK_KALENDER   = True    # hitung porsi hari Ramadan/Lebaran/Idul Adha per triwulan. Dipakai di model level
@@ -105,6 +108,11 @@ KALENDER_DI_MODEL_YOY = False   # True = variabel kalender (bentuk selisih yoy) 
                                 # Default mati: pada data DIY & Babel backtest-nya memburuk. Coba nyalakan & bandingkan.
 EFEK_TRIWULAN_YOY     = False   # True = dummy Q1/Q2/Q3 (pembanding Q4) masuk model yoy, untuk menangkap
                                 # kecenderungan yoy triwulan tertentu (misal Q4 akibat HBKN/Nataru) lebih tinggi.
+PAKAI_RAMADAN        = True     # porsi hari puasa per triwulan
+PAKAI_LEBARAN        = True     # porsi hari sekitar Idul Fitri (Lebaran) per triwulan
+PAKAI_IDULADHA       = True     # porsi hari sekitar Idul Adha per triwulan
+IDULADHA_HARI_SEBELUM = 0       # jendela Idul Adha: H-0 ...
+IDULADHA_HARI_SESUDAH = 0       # ... s.d. H+0 (hari raya saja)
 RAMADAN_HARI         = 30       # lama puasa (hari) sebelum Idul Fitri
 LEBARAN_HARI_SEBELUM = 10       # puncak Lebaran: H-10 (mudik, belanja) ...
 LEBARAN_HARI_SESUDAH = 7        # ... s.d. H+7 (libur, arus balik, wisata)
@@ -138,6 +146,19 @@ PENYESUAIAN = {
 # ---- 10. Pembersihan data ----------------------------------------------------------------
 BERSIHKAN_OUTLIER = True        # pangkas nilai ekstrem pada indikator pendukung (target tidak diubah)
 BATAS_OUTLIER     = 4.0         # makin kecil makin ketat (umumnya 3 s.d. 5)
+OUTLIER_MANUAL    = None        # dict {kode indikator: ["2021Q2", ...]} = hanya periode ini yang ditangani (menggantikan BERSIHKAN_OUTLIER)
+OUTLIER_CARA      = "pangkas"   # "pangkas" = dipotong ke batas wajar | "hapus" = dikosongkan lalu diisi interpolasi
+
+# ---- 11b. Parameter per metode (advanced) ----------------------------------------------------
+ARIMA_MAX_PQ      = 2           # order AR dan MA maksimum yang dicoba ARIMA
+ARIMAX_MAX_PQ     = 1           # order maksimum ARIMAX
+VAR_MAXLAG        = 4           # lag maksimum yang dicoba VAR
+RF_POHON          = 400         # Random Forest: jumlah pohon
+RF_KEDALAMAN      = 4           # Random Forest: kedalaman maksimum pohon
+RF_MIN_DAUN       = 2           # Random Forest: minimal observasi per daun
+GB_POHON          = 250         # Gradient Boosting: jumlah pohon
+GB_LEARNING_RATE  = 0.05        # Gradient Boosting: laju belajar
+GB_KEDALAMAN      = 2           # Gradient Boosting: kedalaman pohon
 
 # ---- 11. Grafik & output ------------------------------------------------------------------
 GRAFIK_MULAI           = "2021Q1"   # awal sumbu waktu pada grafik proyeksi
@@ -335,14 +356,24 @@ df = df_raw.copy()
 df[TARGET] = df[TARGET].interpolate(limit_direction="both")
 winsor_log = []
 for c in EXOG_ALL:
-    s = df[c]
-    if BERSIHKAN_OUTLIER:
-        med = s.median(); mad = 1.4826 * (s - med).abs().median()
-        lo, hi = med - BATAS_OUTLIER * mad, med + BATAS_OUTLIER * mad
-        n_clip = int(((s < lo) | (s > hi)).sum())
+    s_ = df[c]
+    med = s_.median(); mad = 1.4826 * (s_ - med).abs().median()
+    lo, hi = med - BATAS_OUTLIER * mad, med + BATAS_OUTLIER * mad
+    if OUTLIER_MANUAL is not None:
+        per_ = [to_period(x, "OUTLIER_MANUAL") for x in OUTLIER_MANUAL.get(c, [])]
+        per_ = [x for x in per_ if x in s_.index]
+        for x in per_:
+            lama = s_[x]
+            baru = np.nan if OUTLIER_CARA == "hapus" else float(np.clip(lama, lo, hi))
+            df.loc[x, c] = baru
+            winsor_log.append({"Kode": c, "Periode": str(x), "Nilai asli": lama,
+                               "Nilai baru": "diisi interpolasi" if OUTLIER_CARA == "hapus" else baru,
+                               "Cara": OUTLIER_CARA, "Batas bawah": lo, "Batas atas": hi})
+    elif BERSIHKAN_OUTLIER:
+        n_clip = int(((s_ < lo) | (s_ > hi)).sum())
         if n_clip:
             winsor_log.append({"Kode": c, "Batas bawah": lo, "Batas atas": hi, "Nilai dipangkas": n_clip})
-        df[c] = s.clip(lo, hi)
+        df[c] = s_.clip(lo, hi)
 df[EXOG_ALL] = df[EXOG_ALL].interpolate(limit_direction="both")
 
 # ---- Variabel kalender -----------------------------------------------------------
@@ -365,23 +396,54 @@ def buat_kalender(idx):
         d = pd.Timestamp(TANGGAL_IDUL_FITRI[t])
         ram[d - pd.Timedelta(days=RAMADAN_HARI): d - pd.Timedelta(days=1)] = 1
         leb[d - pd.Timedelta(days=LEBARAN_HARI_SEBELUM): d + pd.Timedelta(days=LEBARAN_HARI_SESUDAH)] = 1
-        adha[pd.Timestamp(TANGGAL_IDUL_ADHA[t])] = 1
+        da = pd.Timestamp(TANGGAL_IDUL_ADHA[t])
+        adha[da - pd.Timedelta(days=IDULADHA_HARI_SEBELUM): da + pd.Timedelta(days=IDULADHA_HARI_SESUDAH)] = 1
     q = hari.to_period("Q")
-    kal = pd.DataFrame({"K_RAMADAN": ram.groupby(q).sum() / RAMADAN_HARI,
-                        "K_LEBARAN": leb.groupby(q).sum() / (LEBARAN_HARI_SEBELUM + LEBARAN_HARI_SESUDAH + 1),
-                        "K_IDULADHA": adha.groupby(q).sum()})
+    kal = pd.DataFrame(index=ram.groupby(q).sum().index)
+    if PAKAI_RAMADAN:
+        kal["K_RAMADAN"] = ram.groupby(q).sum() / max(RAMADAN_HARI, 1)
+    if PAKAI_LEBARAN:
+        kal["K_LEBARAN"] = leb.groupby(q).sum() / (LEBARAN_HARI_SEBELUM + LEBARAN_HARI_SESUDAH + 1)
+    if PAKAI_IDULADHA:
+        kal["K_IDULADHA"] = adha.groupby(q).sum() / (IDULADHA_HARI_SEBELUM + IDULADHA_HARI_SESUDAH + 1)
     return kal.reindex(pd.period_range(idx[0] - 4, idx[-1], freq="Q"))
 
 
+PAKAI_EFEK_KALENDER = PAKAI_EFEK_KALENDER and (PAKAI_RAMADAN or PAKAI_LEBARAN or PAKAI_IDULADHA)
 KAL_LVL = buat_kalender(IDX_KAL) if PAKAI_EFEK_KALENDER else pd.DataFrame(index=IDX_KAL)
 KAL_YOY = (KAL_LVL - KAL_LVL.shift(4)).add_suffix("_yoy")
+
+def _ke_bulan(txt, akhir, nama):
+    """'2020Q1' -> Jan 2020 (awal) / Mar 2020 (akhir); '2020-03' -> Mar 2020."""
+    t = str(txt).strip().upper()
+    if "Q" in t:
+        q_ = to_period(t, nama)
+        return (q_.asfreq("M", "end") if akhir else q_.asfreq("M", "start"))
+    try:
+        return pd.Period(t, "M")
+    except Exception:
+        stop(f'{nama} = "{txt}" tidak dikenali. Pakai "2020Q1" atau "2020-03".')
+
+
+def bobot_periode(rng, idx, nama):
+    """Porsi bulan (0 s.d. 1) tiap triwulan yang masuk rentang rng = (awal, akhir)."""
+    a_, b_ = _ke_bulan(rng[0], False, nama), _ke_bulan(rng[1], True, nama)
+    out = []
+    for p in idx:
+        bulan = pd.period_range(p.asfreq("M", "start"), p.asfreq("M", "end"), freq="M")
+        out.append(sum(1 for m in bulan if a_ <= m <= b_) / 3)
+    return out
+
+
+_akhir_pand_bulan = _ke_bulan(PERIODE_PANDEMI[1], True, "PERIODE_PANDEMI")
+_PEMULIHAN = (str(_akhir_pand_bulan + 1), PERIODE_REBOUND[1])
 
 # Dummy (untuk model berbasis yoy): pandemi + kalender dalam bentuk yoy
 DUM = pd.DataFrame(index=ALL_IDX)
 if PAKAI_DUMMY_PANDEMI:
-    for nama, (a, b) in {"D_PANDEMI": PERIODE_PANDEMI, "D_REBOUND": PERIODE_REBOUND}.items():
-        a, b = to_period(a, nama), to_period(b, nama)
-        DUM[nama] = [1.0 if a <= p <= b else 0.0 for p in ALL_IDX]
+    DUM["D_PANDEMI"] = bobot_periode(PERIODE_PANDEMI, ALL_IDX, "PERIODE_PANDEMI")
+    if PAKAI_REBOUND:
+        DUM["D_REBOUND"] = bobot_periode(PERIODE_REBOUND, ALL_IDX, "PERIODE_REBOUND")
 if PAKAI_EFEK_KALENDER and KALENDER_DI_MODEL_YOY:
     DUM = DUM.join(KAL_YOY.reindex(ALL_IDX))
 if EFEK_TRIWULAN_YOY:
@@ -391,17 +453,16 @@ if EFEK_TRIWULAN_YOY:
 # Dummy (untuk model berbasis level): level turun selama pandemi, pulih bertahap
 DUM_L = pd.DataFrame(index=IDX_KAL)
 if MODE_LEVEL and PAKAI_DUMMY_PANDEMI:
-    a1, b1 = to_period(PERIODE_PANDEMI[0], "PERIODE_PANDEMI"), to_period(PERIODE_PANDEMI[1], "PERIODE_PANDEMI")
-    b2 = to_period(PERIODE_REBOUND[1], "PERIODE_REBOUND")
-    DUM_L["D_PANDEMI"] = [1.0 if a1 <= p <= b1 else 0.0 for p in IDX_KAL]
-    DUM_L["D_PEMULIHAN"] = [1.0 if b1 < p <= b2 else 0.0 for p in IDX_KAL]
+    DUM_L["D_PANDEMI"] = bobot_periode(PERIODE_PANDEMI, IDX_KAL, "PERIODE_PANDEMI")
+    if PAKAI_REBOUND:
+        DUM_L["D_PEMULIHAN"] = bobot_periode(_PEMULIHAN, IDX_KAL, "PERIODE_REBOUND")
 if MODE_LEVEL and PAKAI_EFEK_KALENDER:
     DUM_L = DUM_L.join(KAL_LVL.reindex(IDX_KAL))
 
 
 # ---- Jarak yoy antarkuartal: pola historis periode normal -------------------------------
-_awal_krisis = to_period(PERIODE_PANDEMI[0], "PERIODE_PANDEMI")
-_akhir_krisis = to_period(PERIODE_REBOUND[1], "PERIODE_REBOUND")
+_awal_krisis = _ke_bulan(PERIODE_PANDEMI[0], False, "PERIODE_PANDEMI").asfreq("Q")
+_akhir_krisis = _ke_bulan(PERIODE_REBOUND[1] if PAKAI_REBOUND else PERIODE_PANDEMI[1], True, "PERIODE_REBOUND").asfreq("Q")
 
 
 def normal(p):
@@ -501,7 +562,8 @@ def m_mean(y, X, h):
     return dict(mean=np.repeat(y.iloc[-RATA2_JUMLAH_TRIWULAN:].mean(), h), lo=None, hi=None)
 
 
-def _best_arima(y, exog=None, max_pq=2):
+def _best_arima(y, exog=None, max_pq=None):
+    max_pq = ARIMA_MAX_PQ if max_pq is None else max_pq
     best = None
     for p in range(max_pq + 1):
         for q in range(max_pq + 1):
@@ -569,7 +631,7 @@ def m_arimax(y, X, h):
     d_tr, d_fc = dummies(y.index, h)
     ex_tr = stack(X[sel].values, d_tr)
     ex_fc = stack(_forecast_exog(X[sel], h).values, d_fc)
-    res, order = _best_arima(y, exog=ex_tr, max_pq=1)
+    res, order = _best_arima(y, exog=ex_tr, max_pq=ARIMAX_MAX_PQ)
     fc = res.get_forecast(h, exog=ex_fc)
     ci = fc.conf_int(alpha=1 - CI)
     return dict(mean=fc.predicted_mean, lo=ci[:, 0], hi=ci[:, 1], res=res,
@@ -580,7 +642,7 @@ def m_var(y, X, h):
     data = pd.concat([y, X], axis=1)[VAR_VARS]
     d_tr, d_fc = dummies(y.index, h)
     model = VAR(data.values, exog=d_tr)
-    p = max(1, int(model.select_order(maxlags=4).aic))
+    p = max(1, int(model.select_order(maxlags=VAR_MAXLAG).aic))
     res = model.fit(p)
     mean, lo, hi = res.forecast_interval(data.values[-p:], steps=h, alpha=1 - CI, exog_future=d_fc)
     return dict(mean=mean[:, 0], lo=lo[:, 0], hi=hi[:, 0], res=res, info=f"VAR({p}) {' + '.join(VAR_VARS)}")
@@ -665,12 +727,12 @@ def m_faktor(y, X, h):
 
 
 def m_rf(y, X, h):
-    return _direct_ml(y, X, h, lambda: RandomForestRegressor(n_estimators=400, max_depth=4,
-                                                             min_samples_leaf=2, random_state=SEED))
+    return _direct_ml(y, X, h, lambda: RandomForestRegressor(n_estimators=int(RF_POHON), max_depth=int(RF_KEDALAMAN),
+                                                             min_samples_leaf=int(RF_MIN_DAUN), random_state=SEED))
 
 
 def m_gbr(y, X, h):
-    return _direct_ml(y, X, h, lambda: GradientBoostingRegressor(n_estimators=250, learning_rate=0.05, max_depth=2,
+    return _direct_ml(y, X, h, lambda: GradientBoostingRegressor(n_estimators=int(GB_POHON), learning_rate=float(GB_LEARNING_RATE), max_depth=int(GB_KEDALAMAN),
                                                                  subsample=0.8, random_state=SEED))
 
 
@@ -713,7 +775,7 @@ def m_ets_musiman(y, X, h):
     L = _level_train(y)
     lg = np.log(L).copy()
     if PAKAI_DUMMY_PANDEMI:
-        a1 = to_period(PERIODE_PANDEMI[0], "PERIODE_PANDEMI"); b2 = to_period(PERIODE_REBOUND[1], "PERIODE_REBOUND")
+        a1, b2 = _awal_krisis, _akhir_krisis
         pre = lg.loc[:a1 - 1]
         if len(pre) >= 8:
             g = (pre - pre.shift(4)).dropna().iloc[-4:].mean()
@@ -1240,6 +1302,19 @@ pengaturan = pd.DataFrame({"Pengaturan": [
               str(BERSIHKAN_OUTLIER), BATAS_OUTLIER, BEST,
               "Dari jumlah level PDRB 4 triwulan" if MODE_LEVEL else "Rata-rata yoy triwulanan (pendekatan)"]})
 
+_tambah = [
+    ("PAKAI_REBOUND", str(PAKAI_REBOUND)),
+    ("Ramadan / Lebaran / Idul Adha", f"{PAKAI_RAMADAN} / {PAKAI_LEBARAN} / {PAKAI_IDULADHA}"),
+    ("Jendela Idul Adha", f"H-{IDULADHA_HARI_SEBELUM} s.d. H+{IDULADHA_HARI_SESUDAH}"),
+    ("OUTLIER_MANUAL", "-" if OUTLIER_MANUAL is None else (", ".join(f"{k}: {', '.join(v)}" for k, v in OUTLIER_MANUAL.items() if v) or "tidak ada")),
+    ("OUTLIER_CARA", OUTLIER_CARA),
+    ("ARIMA_MAX_PQ / ARIMAX_MAX_PQ / VAR_MAXLAG", f"{ARIMA_MAX_PQ} / {ARIMAX_MAX_PQ} / {VAR_MAXLAG}"),
+    ("RF (pohon / kedalaman / min daun)", f"{RF_POHON} / {RF_KEDALAMAN} / {RF_MIN_DAUN}"),
+    ("GB (pohon / learning rate / kedalaman)", f"{GB_POHON} / {GB_LEARNING_RATE} / {GB_KEDALAMAN}"),
+    ("RATA2_JUMLAH_TRIWULAN", RATA2_JUMLAH_TRIWULAN),
+]
+pengaturan = pd.concat([pengaturan, pd.DataFrame(_tambah, columns=["Pengaturan", "Nilai"])], ignore_index=True)
+pengaturan["Nilai"] = pengaturan["Nilai"].astype(str)
 kalender_out = pd.concat([KAL_LVL, KAL_YOY], axis=1).reindex(ALL_IDX) if PAKAI_EFEK_KALENDER else pd.DataFrame()
 sheets = {
     "Pengaturan": (pengaturan, False),

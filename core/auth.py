@@ -3,7 +3,13 @@ import hashlib
 import hmac
 import os
 
-AKUN_AWAL = [f"user{i}" for i in range(1, 6)]
+AKUN_AWAL = [  # (username untuk login, nama tampilan)
+    ("rachmad", "Rachmad Irvan Syahputra"),
+    ("febiola", "Febiola Napitupulu"),
+    ("torkis", "Torkis Justicio Paruhum Natigor Hasibuan"),
+    ("shania", "Shania Gumilar"),
+    ("sigit", "Sigit Setiawan"),
+]
 PASSWORD_AWAL = "123456"
 ITER = 120_000
 
@@ -24,7 +30,7 @@ def cek_password(pw, stored):
 
 
 def pastikan_akun_awal(be):
-    """Membuat user1 s.d. user5 bila belum ada (dipakai mode lokal; di Supabase lewat schema.sql)."""
-    for u in AKUN_AWAL:
+    """Membuat 5 akun awal bila belum ada (dipakai mode lokal; di Supabase lewat schema.sql)."""
+    for u, nama in AKUN_AWAL:
         if not be.get_user(u):
-            be.create_user(u, hash_password(PASSWORD_AWAL))
+            be.create_user(u, hash_password(PASSWORD_AWAL), nama)

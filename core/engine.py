@@ -100,31 +100,42 @@ def _f(x):
         return None
 
 
+BENCH = ("Naive", "Rata-rata 8Q")
+
+
+def pilih_utama(metode_urut):
+    """Metode utama untuk ditampilkan: Ensemble bila ada, selain itu metode non-benchmark terbaik."""
+    if "Ensemble" in metode_urut:
+        return "Ensemble"
+    return next((m for m in metode_urut if m not in BENCH), metode_urut[0])
+
+
 def build_summary(ns):
+    order = ns["ORDER"]
     best = ns["BEST"]
+    utama = pilih_utama(order)
     final = ns["final"]
     fc = ns["fc_periods"]
-    order = ns["ORDER"]
-    proj = [{"periode": str(p), "yoy": _f(final[best].loc[p, "Proyeksi"]),
-             "lower": _f(final[best].loc[p, "Lower"]), "upper": _f(final[best].loc[p, "Upper"])} for p in fc]
+    proj = [{"periode": str(p), "yoy": _f(final[utama].loc[p, "Proyeksi"]),
+             "lower": _f(final[utama].loc[p, "Lower"]), "upper": _f(final[utama].loc[p, "Upper"])} for p in fc]
     y = ns["y_all"]
     hist = [{"periode": str(p), "yoy": _f(v)} for p, v in y.iloc[-16:].items()]
     met = ns["metrik"]
-    top = []
-    for _, r in met.head(15).iterrows():
-        top.append({"metode": r["Metode"], "rmse": _f(r["RMSE"]), "mae": _f(r["MAE"]),
-                    "bias": _f(r["ME (bias)"]), "mase": _f(r["MASE"]), "arah": _f(r["Akurasi arah (%)"])})
+    top = [{"metode": r["Metode"], "rmse": _f(r["RMSE"]), "mae": _f(r["MAE"]), "bias": _f(r["ME (bias)"]),
+            "mase": _f(r["MASE"]), "arah": _f(r["Akurasi arah (%)"])} for _, r in met.iterrows()]
     tah = ns["tahunan"]
-    tahunan = {str(c): _f(tah.loc[best, c]) for c in tah.columns}
-    brow = met[met.Metode == best].iloc[0]
+    tahunan = {str(c): _f(tah.loc[utama, c]) for c in tah.columns}
+    urow = met[met.Metode == utama].iloc[0]
+    spes = {k: str(v) for k, v in ns.get("spesifikasi", {}).items() if v}
     return {
-        "metode_terbaik": best, "rmse_terbaik": _f(brow["RMSE"]), "arah_terbaik": _f(brow["Akurasi arah (%)"]),
-        "proyeksi": proj, "historis": hist, "tahunan": tahunan, "metrik": top,
+        "metode_terbaik": best, "metode_utama": utama, "peringkat_utama": int(urow["Peringkat"]),
+        "rmse_terbaik": _f(urow["RMSE"]), "arah_terbaik": _f(urow["Akurasi arah (%)"]),
+        "proyeksi": proj, "historis": hist, "tahunan": tahunan, "metrik": top, "spesifikasi": spes,
         "mode": "level" if ns["MODE_LEVEL"] else "yoy", "target": ns["TARGET"],
         "label_target": str(ns["LABEL"].get(ns["TARGET"], ns["TARGET"])),
         "data_awal": str(ns["df_raw"].index[0]), "data_akhir": str(ns["df_raw"].index[-1]),
         "proyeksi_sampai": str(fc[-1]), "indikator": list(ns["EXOG_ALL"]),
         "metode_aktif": list(ns["aktif"]), "dilewati": list(ns["dilewati"]),
-        "jumlah_titik_uji": int(brow["Jumlah titik uji"]), "urutan": order,
+        "jumlah_titik_uji": int(urow["Jumlah titik uji"]), "urutan": order,
         "bobot_ensemble": {k: _f(v) for k, v in ns["W"].items()} if len(ns["W"]) else {},
     }

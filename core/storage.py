@@ -26,7 +26,7 @@ class LocalBackend:
         self.db = self.root / "app.db"
         with self._con() as c:
             c.executescript("""
-            create table if not exists app_users(id integer primary key, username text unique, password_hash text, created_at text);
+            create table if not exists app_users(id integer primary key, username text unique, password_hash text, display_name text, created_at text);
             create table if not exists datasets(id text primary key, user_id integer, name text, filename text, sheet text,
                 storage_path text, info text, labels text, created_at text);
             create table if not exists runs(id text primary key, user_id integer, dataset_id text, name text, note text,
@@ -41,13 +41,13 @@ class LocalBackend:
     # users
     def get_user(self, username):
         with self._con() as c:
-            r = c.execute("select * from app_users where username=?", (username,)).fetchone()
+            r = c.execute("select * from app_users where lower(username)=lower(?)", (username,)).fetchone()
         return dict(r) if r else None
 
-    def create_user(self, username, password_hash):
+    def create_user(self, username, password_hash, display_name=None):
         with self._con() as c:
-            c.execute("insert or ignore into app_users(username,password_hash,created_at) values(?,?,?)",
-                      (username, password_hash, _now()))
+            c.execute("insert or ignore into app_users(username,password_hash,display_name,created_at) values(?,?,?,?)",
+                      (username, password_hash, display_name or username, _now()))
 
     def set_password(self, user_id, password_hash):
         with self._con() as c:
@@ -110,11 +110,11 @@ class SupabaseBackend:
         self.sb = create_client(url, key)
 
     def get_user(self, username):
-        r = self.sb.table("app_users").select("*").eq("username", username).limit(1).execute()
+        r = self.sb.table("app_users").select("*").ilike("username", username).limit(1).execute()
         return r.data[0] if r.data else None
 
-    def create_user(self, username, password_hash):
-        self.sb.table("app_users").upsert({"username": username, "password_hash": password_hash},
+    def create_user(self, username, password_hash, display_name=None):
+        self.sb.table("app_users").upsert({"username": username, "password_hash": password_hash, "display_name": display_name or username},
                                           on_conflict="username", ignore_duplicates=True).execute()
 
     def set_password(self, user_id, password_hash):

@@ -52,7 +52,8 @@ def ringkasan_dari_excel(excel):
         raise ValueError(f"Sheet {', '.join(miss)} tidak ada. Pastikan file berasal dari notebook proyeksi versi terbaru.")
     peng = pd.read_excel(x, "Pengaturan").set_index("Pengaturan")["Nilai"].astype(str).to_dict()
     met = pd.read_excel(x, "Metrik_Error_Backtest")
-    best = peng.get("Metode terbaik (RMSE)") or met.iloc[0]["Metode"]
+    best_rmse = peng.get("Metode terbaik (RMSE)") or met.iloc[0]["Metode"]
+    best = engine.pilih_utama(list(met["Metode"]))
     ci = pd.read_excel(x, "Proyeksi_dengan_CI")
     ci = ci[ci["Metode"] == best]
     ser = pd.read_excel(x, "Series_Aktual_Proyeksi")
@@ -69,7 +70,10 @@ def ringkasan_dari_excel(excel):
     ind = [s.strip() for s in peng.get("INDIKATOR_DIPAKAI", "").split(",") if s.strip() and s.strip() != "-"]
     aktif = [s.strip() for s in peng.get("METODE aktif", "").split(",") if s.strip()]
     summary = {
-        "metode_terbaik": best, "rmse_terbaik": _f(brow["RMSE"]), "arah_terbaik": _f(brow.get("Akurasi arah (%)")),
+        "metode_terbaik": best_rmse, "metode_utama": best, "peringkat_utama": int(brow.get("Peringkat", 1)),
+        "spesifikasi": ({r["Metode"]: str(r["Spesifikasi terpilih"]) for _, r in pd.read_excel(x, "Penjelasan_Metode").iterrows()
+                         if pd.notna(r.get("Spesifikasi terpilih"))} if "Penjelasan_Metode" in x.sheet_names else {}),
+        "rmse_terbaik": _f(brow["RMSE"]), "arah_terbaik": _f(brow.get("Akurasi arah (%)")),
         "proyeksi": [{"periode": str(r["Periode"]), "yoy": _f(r["Proyeksi"]), "lower": _f(r["Lower"]), "upper": _f(r["Upper"])} for _, r in ci.iterrows()],
         "historis": [{"periode": str(r["Periode"]), "yoy": _f(r["Aktual"])} for _, r in hist.tail(16).iterrows()],
         "tahunan": {str(c): _f(tah.loc[best, c]) for c in tah.columns} if best in tah.index else {},
