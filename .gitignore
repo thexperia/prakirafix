@@ -1,0 +1,5 @@
+local_data/
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+output/

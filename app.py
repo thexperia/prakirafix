@@ -26,13 +26,14 @@ def halaman_login():
         st.title("Proyeksi PDRB")
         st.caption("Masuk untuk memakai dataset dan melihat riwayat run milikmu.")
         with st.form("login"):
-            u = st.text_input("Username", placeholder="user1")
+            u = st.text_input("Username", placeholder="contoh: rachmad")
             p = st.text_input("Password", type="password")
             ok = st.form_submit_button("Masuk", type="primary", use_container_width=True)
         if ok:
-            user = be.get_user(u.strip())
+            user = be.get_user(u.strip()) if u.strip() and all(ch.isalnum() or ch in "._-" for ch in u.strip()) else None
             if user and cek_password(p, user["password_hash"]):
-                st.session_state["user"] = {"id": user["id"], "username": user["username"]}
+                st.session_state["user"] = {"id": user["id"], "username": user["username"],
+                                            "nama": user.get("display_name") or user["username"]}
                 st.session_state["baru_login"] = True
                 st.rerun()
             else:
@@ -67,7 +68,7 @@ with st.sidebar:
         st.markdown(f"**Dataset aktif**  \n{ds['name']}  \n<small>{ds['info'].get('periode_awal')} s.d. {ds['info'].get('periode_akhir')}</small>",
                     unsafe_allow_html=True)
     st.divider()
-    st.markdown(f"👤 **{st.session_state['user']['username']}**")
+    st.markdown(f"👤 **{st.session_state['user'].get('nama', st.session_state['user']['username'])}**  \n<small>@{st.session_state['user']['username']}</small>", unsafe_allow_html=True)
     if st.button("Keluar", use_container_width=True):
         for k in list(st.session_state.keys()):
             if k != "_backend":

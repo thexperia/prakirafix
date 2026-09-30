@@ -1,10 +1,11 @@
 -- Jalankan sekali di Supabase: menu SQL Editor > New query > tempel semua isi file ini > Run.
--- Membuat tabel, bucket penyimpanan file, dan 5 akun awal (user1 s.d. user5, password 123456).
+-- Membuat tabel, bucket penyimpanan file, dan 5 akun awal (password awal 123456).
 
 create table if not exists public.app_users (
   id bigint generated always as identity primary key,
   username text unique not null,
   password_hash text not null,
+  display_name text,
   created_at timestamptz default now()
 );
 
@@ -49,10 +50,10 @@ values ('proyeksi-files', 'proyeksi-files', false)
 on conflict (id) do nothing;
 
 -- 5 akun awal. Password 123456 disimpan sebagai hash PBKDF2, bukan teks asli.
-insert into public.app_users (username, password_hash) values
-  ('user1', 'pbkdf2$120000$e821ae2928dd53dabb1196e4efb33aab$2989d80deff8f10fa2042f91c571187ae71526c28e809becba033e02359cbc45'),
-  ('user2', 'pbkdf2$120000$932a4c7086b79421f01b053bd2a1ca3d$1410d1b0eb21ed8f3c74b39f667c5a7e3494bd19444ecab25d1286589cc012f4'),
-  ('user3', 'pbkdf2$120000$09310d60f70be280c105b686303e8529$66a7871427ef5e729effe5c637725b166e99522ef92215b0a781ffcc29b7137a'),
-  ('user4', 'pbkdf2$120000$17c3c3d24c39799129c7af0d5c2acaaf$a57cf810398d6fb23a87096704f81b91902c762f7fcc1af6e4aeccf5bb0c2019'),
-  ('user5', 'pbkdf2$120000$0cb025afc3d6d9f16fed04547a6d5caf$717e7bea1aa655e5ecbb8ed21d7df86222e982a877a1add0e03664a9ebe33272')
+insert into public.app_users (username, display_name, password_hash) values
+  ('rachmad', 'Rachmad Irvan Syahputra', 'pbkdf2$120000$ad953f56281002358c97916e529cc500$da37327e654d3fff092cfae9fe2b7a9a7702e8dfae821baa0892a1b4f4c9c82c'),
+  ('febiola', 'Febiola Napitupulu', 'pbkdf2$120000$9ca0e4612ac22f215013c455cc0814eb$34f8820437f20793a66521320c1b729d094be2b4b482489f1c796f425b58275f'),
+  ('torkis', 'Torkis Justicio Paruhum Natigor Hasibuan', 'pbkdf2$120000$f6c59cef5b658b589d007127ae21ba27$de2c780a5cd91f1306235cf46c58d1229485e44921663f6857ff2241b0a3b2dd'),
+  ('shania', 'Shania Gumilar', 'pbkdf2$120000$2d9d5be6ba6dd488b23451c5bfaf7d15$dbe36121622370a87452e7f0ed9585ccfb8a8d80fa27f39e645b3a320616536f'),
+  ('sigit', 'Sigit Setiawan', 'pbkdf2$120000$301b89c1ab9a3216c936773a11d44d0a$87ea0dd26e56ccd180732049cff18cbdffa7c37a9d297f5998b330b00a38094c')
 on conflict (username) do nothing;
