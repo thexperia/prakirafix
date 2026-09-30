@@ -1,11 +1,16 @@
 import streamlit as st
 
-from core import nav, ui
+from core import engine, nav, ui
 from core.common import daftar_dataset, daftar_run, tgl
 
 
+def _utama(s):
+    return s.get("metode_utama") or engine.pilih_utama(s.get("urutan") or [m["metode"] for m in s.get("metrik", [])] or ["-"])
+
+
 def show():
-    user = st.session_state["user"]["username"]
+    u = st.session_state["user"]
+    user = (u.get("nama") or u["username"]).split()[0]
     runs = daftar_run()
     dsets = daftar_dataset()
     ui.header("Beranda", f"Halo, {user}")
@@ -17,10 +22,10 @@ def show():
         r0 = runs[0]
         ui.kpi(c[2], "Run terakhir", tgl(r0["created_at"]).split(",")[0], r0.get("name") or "")
         s0 = r0.get("summary") or {}
-        ui.kpi(c[3], "Metode terbaik", s0.get("metode_terbaik", "-"), f"RMSE {ui.fmt(s0.get('rmse_terbaik'), 3)} pada run terakhir", ui.g("RMSE"))
+        ui.kpi(c[3], "Metode utama", _utama(s0), f"RMSE {ui.fmt(s0.get('rmse_terbaik'), 3)} pada run terakhir", ui.g("RMSE"))
     else:
         ui.kpi(c[2], "Run terakhir", "-", "belum ada run")
-        ui.kpi(c[3], "Metode terbaik", "-", "")
+        ui.kpi(c[3], "Metode utama", "-", "")
 
     b1, b2, _ = st.columns([1, 1, 3])
     if b1.button("▶ Jalankan proyeksi baru", type="primary", use_container_width=True):
@@ -42,15 +47,16 @@ def show():
                 ch = ui.chart_proyeksi(s, 260)
                 if ch is not None:
                     st.altair_chart(ch, use_container_width=True)
-                k = st.columns(4)
                 pr = s.get("proyeksi", [])
-                if pr:
-                    ui.kpi(k[0], f"{pr[0]['periode']} (yoy)", ui.fmt(pr[0]["yoy"], 2, True), s.get("metode_terbaik", ""))
                 th = s.get("tahunan", {})
                 yrs = [y for y in th if th[y] is not None][-2:]
+                k1, k2 = st.columns(2), st.columns(2)
+                slot = [k1[0], k1[1], k2[0], k2[1]]
+                if pr:
+                    ui.kpi(slot[0], f"yoy {pr[0]['periode']}", ui.fmt(pr[0]["yoy"], 2, True), _utama(s))
                 for i, y in enumerate(yrs):
-                    ui.kpi(k[1 + i], f"Pertumbuhan {y}", ui.fmt(th[y], 2, True), "dari data + proyeksi", ui.g("Pertumbuhan tahunan"))
-                ui.kpi(k[3], "Akurasi arah", ui.fmt(s.get("arah_terbaik"), 0, True), "backtest", ui.g("Akurasi arah"))
+                    ui.kpi(slot[1 + i], f"Tumbuh {y}", ui.fmt(th[y], 2, True), "dari data + proyeksi", ui.g("Pertumbuhan tahunan"))
+                ui.kpi(slot[3], "Akurasi arah", ui.fmt(s.get("arah_terbaik"), 0, True), f"backtest {_utama(s)}", ui.g("Akurasi arah"))
                 if st.button("Lihat detail lengkap →"):
                     st.session_state["run_terpilih"] = r0["id"]
                     nav.go("riwayat")
@@ -72,7 +78,7 @@ def show():
         return
     q = st.text_input("Cari run", placeholder="nama atau catatan run", label_visibility="collapsed")
     hdr = st.columns([2.6, 1.6, 1.2, 1.1, 0.9, 1.4, 1.2])
-    for h, t in zip(hdr, ["Nama run", "Dataset", "Proyeksi s.d.", "Terbaik", "RMSE ↓", "Tanggal", ""]):
+    for h, t in zip(hdr, ["Nama run", "Dataset", "Proyeksi s.d.", "Metode utama", "RMSE ↓", "Tanggal", ""]):
         h.markdown(f"<small><b>{t}</b></small>", unsafe_allow_html=True)
     dsname = {d["id"]: d["name"] for d in dsets}
     for r in runs:
@@ -84,7 +90,7 @@ def show():
         cols[0].markdown(f"**{r.get('name')}**" + (f"  \n<small>{r['note']}</small>" if r.get("note") else ""), unsafe_allow_html=True)
         cols[1].write(dsname.get(r.get("dataset_id"), "(dataset dihapus)"))
         cols[2].write(s.get("proyeksi_sampai", "-"))
-        cols[3].write(s.get("metode_terbaik", "-"))
+        cols[3].write(_utama(s) if s else "-")
         cols[4].write(ui.fmt(s.get("rmse_terbaik"), 3))
         cols[5].write(tgl(r["created_at"]))
         if cols[6].button("Buka", key=f"open_{r['id']}", use_container_width=True):

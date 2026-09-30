@@ -39,8 +39,10 @@ def pratinjau(res, key):
         st.dataframe(show.reset_index(), column_config=cfg, hide_index=True, use_container_width=True, height=320, key=f"tbl_{key}")
         st.caption("Arahkan kursor ke judul kolom untuk melihat nama lengkap indikator.")
     with t2:
-        col = st.selectbox("Kolom", list(df.columns), index=list(df.columns).index("GPDRB") if "GPDRB" in df.columns else 0,
-                           format_func=lambda c_: f"{c_} · {labels.get(c_, c_)}", key=f"sel_{key}")
+        cc = st.columns([1, 2.4])
+        col = cc[0].selectbox("Kolom", list(df.columns), index=list(df.columns).index("GPDRB") if "GPDRB" in df.columns else 0, key=f"sel_{key}")
+        cc[1].markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
+        cc[1].caption(labels.get(col, col))
         s = df[col].copy()
         s.index = s.index.to_timestamp()
         st.line_chart(s, height=280, color=ui.TEAL)

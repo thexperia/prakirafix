@@ -1,7 +1,9 @@
+import re
+
 import pandas as pd
 import streamlit as st
 
-from core import nav, ui
+from core import engine, nav, ui
 from core.common import daftar_dataset, daftar_run, file_bytes, tgl, uid
 from core.storage import get_backend
 
@@ -26,6 +28,134 @@ def _sheet(sheets, name, **kw):
         st.caption("Tidak tersedia untuk run ini.")
 
 
+def _utama(s):
+    return s.get("metode_utama") or engine.pilih_utama(s.get("urutan") or [m["metode"] for m in s.get("metrik", [])] or ["-"])
+
+
+def _spesifikasi(s, sheets):
+    sp = dict(s.get("spesifikasi") or {})
+    if not sp and "Penjelasan_Metode" in sheets:
+        pm = sheets["Penjelasan_Metode"]
+        sp = {r["Metode"]: str(r["Spesifikasi terpilih"]) for _, r in pm.iterrows() if pd.notna(r.get("Spesifikasi terpilih"))}
+    return sp
+
+
+def ringkasan(s, sheets):
+    met = sheets.get("Metrik_Error_Backtest")
+    urut = list(met["Metode"]) if met is not None else [m["metode"] for m in s.get("metrik", [])]
+    utama = _utama(s)
+    rm = met.set_index("Metode") if met is not None else pd.DataFrame()
+    n = len(urut)
+
+    # ---- pemilih metode yang disorot
+    def lbl(m):
+        if m in rm.index:
+            r = rm.loc[m]
+            return f"{m} · peringkat {int(r['Peringkat'])} · RMSE {ui.fmt(r['RMSE'], 3)}" + (" · pembanding" if m in engine.BENCH else "")
+        return m
+    c1, c2 = st.columns([1.3, 2])
+    sorot = c1.selectbox("Sorot metode", urut, index=urut.index(utama) if utama in urut else 0, format_func=lbl,
+                         help="Semua metode tetap tampil sebagai garis abu-abu. Metode yang dipilih diberi warna beserta rentang kemungkinannya.")
+    c2.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    c2.caption(f"Metode utama run ini: **{utama}**. " + ("Naive dan Rata-rata 8Q adalah pembanding sederhana, dipakai untuk mengukur apakah model lain memberi nilai tambah."))
+
+    # ---- KPI metode yang disorot
+    tah = sheets.get("Pertumbuhan_Tahunan")
+    th = {}
+    if tah is not None and sorot in set(tah["Metode"]):
+        rr = tah[tah["Metode"] == sorot].iloc[0]
+        th = {str(c): rr[c] for c in tah.columns if c != "Metode"}
+    elif sorot == utama:
+        th = s.get("tahunan", {})
+    k = st.columns(4)
+    yrs = [y for y in th if pd.notna(th[y])][-2:]
+    for i, y in enumerate(yrs):
+        ui.kpi(k[i], f"Tumbuh {y}", ui.fmt(th[y], 2, True), "total 4 triwulan" if s.get("mode") == "level" else "rata-rata yoy 4 triwulan", ui.g("Pertumbuhan tahunan"))
+    if sorot in rm.index:
+        r = rm.loc[sorot]
+        ui.kpi(k[2], "RMSE backtest", ui.fmt(r["RMSE"], 3), f"peringkat {int(r['Peringkat'])} dari {n}", ui.g("RMSE"))
+        ui.kpi(k[3], "Akurasi arah", ui.fmt(r.get("Akurasi arah (%)"), 0, True) if pd.notna(r.get("Akurasi arah (%)")) else "-",
+               f"{int(r.get('Jumlah titik uji', 0) or 0)} titik uji", ui.g("Akurasi arah"))
+
+    # ---- grafik besar + tabel per triwulan
+    l, rcol = st.columns([2.2, 1])
+    ser, ci = sheets.get("Series_Aktual_Proyeksi"), sheets.get("Proyeksi_dengan_CI")
+    with l:
+        st.markdown(f"**Pertumbuhan yoy {s.get('label_target', '')}: aktual dan proyeksi semua metode**")
+        ch = ui.chart_semua(ser, ci, sorot) if ser is not None else ui.chart_proyeksi(s)
+        if ch is not None:
+            st.altair_chart(ch, use_container_width=True)
+        st.caption(f"Hitam = aktual · abu-abu = metode lain · berwarna = {sorot}, area muda = rentang kemungkinan (selang kepercayaan). Arahkan kursor ke garis untuk melihat nama metode.")
+    with rcol:
+        st.markdown(f"**Proyeksi per triwulan · {sorot}**")
+        if ci is not None and sorot in set(ci["Metode"]):
+            pr = ci[ci["Metode"] == sorot][["Periode", "Proyeksi", "Lower", "Upper"]].copy()
+        else:
+            py = sheets.get("Proyeksi_yoy")
+            pr = pd.DataFrame()
+            if py is not None and sorot in py:
+                pr = pd.DataFrame({"Periode": py.iloc[:, 0], "Proyeksi": py[sorot]})
+        if len(pr):
+            pr["Periode"] = pr["Periode"].astype(str)
+            cols = [c for c in ["Periode", "Proyeksi", "Lower", "Upper"] if c in pr]
+            st.dataframe(pr, hide_index=True, use_container_width=True, column_order=cols,
+                         column_config={"Periode": st.column_config.TextColumn("Periode", width="small"),
+                                        "Proyeksi": st.column_config.NumberColumn("yoy (%)", format="%.2f", help=ui.g("yoy")),
+                                        "Lower": st.column_config.NumberColumn("Bawah", format="%.2f", help=ui.g("Selang kepercayaan")),
+                                        "Upper": st.column_config.NumberColumn("Atas", format="%.2f", help=ui.g("Selang kepercayaan"))})
+        if sorot == "Ensemble" and s.get("bobot_ensemble"):
+            st.markdown("**Bobot Ensemble**", help=ui.g("Bobot Ensemble"))
+            st.altair_chart(ui.chart_bobot(s["bobot_ensemble"]), use_container_width=True)
+        sp = _spesifikasi(s, sheets).get(sorot)
+        if sp and sorot != "Ensemble":
+            st.caption(f"Spesifikasi {sorot}: {sp}")
+
+    # ---- rangkuman model
+    st.markdown("#### Rangkuman model")
+    if met is not None:
+        nonb = met[~met["Metode"].isin(engine.BENCH)]
+        top = nonb.head(3)
+        naive = met[met["Metode"] == "Naive"]
+        rm_naive = float(naive["RMSE"].iloc[0]) if len(naive) else None
+        lebih_baik = nonb[nonb["RMSE"] < rm_naive] if rm_naive is not None else nonb
+        arah = nonb.dropna(subset=["Akurasi arah (%)"]).sort_values("Akurasi arah (%)", ascending=False).head(1) if "Akurasi arah (%)" in nonb else pd.DataFrame()
+        ind = s.get("indikator") or []
+        sp = _spesifikasi(s, sheets)
+        arx = sp.get("ARIMAX", "")
+        teks = [f"Tiga model dengan error backtest terkecil: " + ", ".join(f"<b>{r['Metode']}</b> (RMSE {ui.fmt(r['RMSE'], 3)})" for _, r in top.iterrows()) + "."]
+        if rm_naive is not None:
+            teks.append(f"Pembanding Naive memiliki RMSE {ui.fmt(rm_naive, 3)}; <b>{len(lebih_baik)} dari {len(nonb)}</b> model lain lebih akurat dari pembanding ini"
+                        + (f" ({', '.join(lebih_baik['Metode'].head(6))}{'…' if len(lebih_baik) > 6 else ''})." if len(lebih_baik) else "."))
+        if len(arah):
+            teks.append(f"Arah naik/turun paling sering tepat: <b>{arah.iloc[0]['Metode']}</b> ({ui.fmt(arah.iloc[0]['Akurasi arah (%)'], 0, True)}).")
+        teks.append("Indikator pendukung: " + (", ".join(f"<b>{i}</b>" for i in ind) if ind else "tidak ada") + "."
+                    + (f" ARIMAX memilih {m_.group(1).strip().rstrip(',')}." if (m_ := re.search(r"indikator:\s*([^()]+)", arx)) else ""))
+        rh = sheets.get("RMSE_per_Horizon")
+        if rh is not None:
+            hc = [c for c in rh.columns if str(c).startswith("h=")]
+            rn = rh[~rh["Metode"].isin(engine.BENCH)]
+            if hc and len(rn):
+                best_h = [f"{c}: {rn.loc[rn[c].idxmin(), 'Metode']}" for c in hc if rn[c].notna().any()]
+                teks.append("Terbaik per horizon: " + " · ".join(best_h) + ".")
+        st.markdown('<div class="ringkas">' + "<br>".join(teks) + "</div>", unsafe_allow_html=True)
+        st.markdown("")
+        tb = met[["Peringkat", "Metode", "RMSE", "MAE", "Akurasi arah (%)"]].copy()
+        tb["Akurasi arah (%)"] = pd.to_numeric(tb["Akurasi arah (%)"], errors="coerce")
+        tb["Spesifikasi"] = tb["Metode"].map(lambda m: "pembanding" if m in engine.BENCH else sp.get(m, ""))
+        st.dataframe(tb, hide_index=True, use_container_width=True,
+                     column_config={"Peringkat": st.column_config.NumberColumn("#", width="small"),
+                                    "RMSE": st.column_config.NumberColumn("RMSE ↓", format="%.3f", help=ui.g("RMSE")),
+                                    "MAE": st.column_config.NumberColumn("MAE ↓", format="%.3f", help=ui.g("MAE")),
+                                    "Akurasi arah (%)": st.column_config.NumberColumn("Arah ↑ (%)", format="%.0f", help=ui.g("Akurasi arah")),
+                                    "Spesifikasi": st.column_config.TextColumn(width="large")})
+    py = sheets.get("Proyeksi_yoy")
+    if py is not None:
+        with st.expander("Proyeksi per triwulan, semua metode"):
+            py = py.rename(columns={py.columns[0]: "Periode"})
+            py["Periode"] = py["Periode"].astype(str)
+            ui.df_with_help(py)
+
+
 def detail(run):
     s = run.get("summary") or {}
     st_ = run.get("settings") or {}
@@ -40,7 +170,7 @@ def detail(run):
     b = st.columns([1, 1, 1, 3])
     b[0].download_button("⬇ Unduh Excel", excel, f"{run.get('name', 'hasil')}.xlsx".replace("/", "-"),
                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
-    b[1].download_button("⬇ Unduh grafik (.zip)", file_bytes(run["charts_path"]), "grafik.zip", "application/zip", use_container_width=True)
+    b[1].download_button("⬇ Grafik (.zip)", file_bytes(run["charts_path"]), "grafik.zip", "application/zip", use_container_width=True)
     if b[2].button("↻ Jalankan ulang", use_container_width=True, help="Buka pengaturan run ini untuk dijalankan lagi, misalnya dengan data terbaru."):
         st.session_state["prefill"] = {"dataset_id": run.get("dataset_id"), "settings": st_, "name": f"{run.get('name')} (ulang)", "note": run.get("note") or ""}
         nav.go("jalankan")
@@ -51,35 +181,8 @@ def detail(run):
 
     sheets = ui.read_excel_sheets(excel)
     tabs = st.tabs(["Ringkasan", "Proyeksi per metode", "Metrik error", "Backtest", "Musiman & jarak yoy", "Diagnostik", "Validasi data", "Pengaturan", "Semua grafik"])
-    best = s.get("metode_terbaik")
     with tabs[0]:
-        k = st.columns(4)
-        th = s.get("tahunan", {})
-        yrs = [y for y in th if th[y] is not None][-2:]
-        for i, y in enumerate(yrs):
-            ui.kpi(k[i], f"Pertumbuhan {y}", ui.fmt(th[y], 2, True), "total 4 triwulan (aktual + proyeksi)" if s.get("mode") == "level" else "rata-rata yoy 4 triwulan",
-                   ui.g("Pertumbuhan tahunan"))
-        ui.kpi(k[2], f"RMSE {best}", ui.fmt(s.get("rmse_terbaik"), 3), f"peringkat 1 dari {len(s.get('metrik', []))}", ui.g("RMSE"))
-        ui.kpi(k[3], "Akurasi arah", ui.fmt(s.get("arah_terbaik"), 0, True), f"{s.get('jumlah_titik_uji')} titik uji", ui.g("Akurasi arah"))
-        l, r = st.columns([1.8, 1])
-        with l:
-            st.markdown(f"**Pertumbuhan yoy {s.get('label_target', '')}: aktual dan proyeksi {best}**")
-            ch = ui.chart_proyeksi(s)
-            if ch is not None:
-                st.altair_chart(ch, use_container_width=True)
-            st.caption("Garis hitam = aktual · garis hijau = proyeksi · area hijau muda = rentang kemungkinan (selang kepercayaan).")
-        with r:
-            st.markdown(f"**Proyeksi per triwulan ({best})**")
-            pr = pd.DataFrame(s.get("proyeksi", []))
-            if len(pr):
-                pr = pr.rename(columns={"periode": "Periode", "yoy": "yoy (%)", "lower": "Batas bawah", "upper": "Batas atas"})
-                st.dataframe(pr, hide_index=True, use_container_width=True,
-                             column_config={"yoy (%)": st.column_config.NumberColumn(format="%.2f", help=ui.g("yoy")),
-                                            "Batas bawah": st.column_config.NumberColumn(format="%.2f", help=ui.g("Selang kepercayaan")),
-                                            "Batas atas": st.column_config.NumberColumn(format="%.2f", help=ui.g("Selang kepercayaan"))})
-            if s.get("bobot_ensemble"):
-                st.markdown("**Bobot Ensemble**", help=ui.g("Bobot Ensemble"))
-                st.altair_chart(ui.chart_bobot(s["bobot_ensemble"]), use_container_width=True)
+        ringkasan(s, sheets)
     with tabs[1]:
         st.markdown("**Proyeksi yoy semua metode (sudah termasuk add-factor)**")
         _sheet(sheets, "Proyeksi_yoy")
@@ -119,7 +222,7 @@ def detail(run):
         _sheet(sheets, "Diagnostik_InSample")
     with tabs[6]:
         _sheet(sheets, "Validasi_Data")
-        st.markdown("**Log pembersihan outlier**", help=ui.g("Bersihkan outlier"))
+        st.markdown("**Log penanganan outlier**", help=ui.g("Penanganan outlier"))
         _sheet(sheets, "Log_Pembersihan")
         if "01_data_historis.png" in charts:
             st.image(charts["01_data_historis.png"], use_container_width=True)
@@ -163,7 +266,7 @@ def impor_colab():
             return
         dres = impor.cek_data(isi["data_bytes"])
         st.markdown(f"**Terbaca:** target {summary['target']}, data {summary['data_awal']} s.d. {summary['data_akhir']}, proyeksi s.d. "
-                    f"{summary['proyeksi_sampai']}, metode terbaik {summary['metode_terbaik']} (RMSE {ui.fmt(summary['rmse_terbaik'], 3)}). "
+                    f"{summary['proyeksi_sampai']}, metode utama {summary['metode_utama']} (RMSE {ui.fmt(summary['rmse_terbaik'], 3)}). "
                     + (f"File data **{isi['data_name']}** ikut disimpan sebagai dataset." if dres else "Tidak ada file data yang valid di zip; run disimpan tanpa dataset."))
         c1, c2 = st.columns([1, 1.4])
         base = isi["data_name"].rsplit(".", 1)[0].replace("_", " ") if isi["data_name"] else summary["target"]
@@ -210,18 +313,29 @@ def show():
         st.info("Belum ada run. Buat di menu **Jalankan Proyeksi**, atau impor hasil dari Google Colab.")
         return
     dsname = {d["id"]: d["name"] for d in daftar_dataset()}
-    rows = []
+    q = st.text_input("Cari run", placeholder="cari nama atau catatan run", label_visibility="collapsed")
     for r in runs:
+        if q and q.lower() not in f"{r.get('name', '')} {r.get('note', '')}".lower():
+            continue
         s = r.get("summary") or {}
-        pr = s.get("proyeksi") or [{}]
-        rows.append({"Nama run": r.get("name"), "Catatan": r.get("note") or "", "Dataset": dsname.get(r.get("dataset_id"), "(dihapus)"),
-                     "Target": s.get("target"), "Proyeksi s.d.": s.get("proyeksi_sampai"), "Terbaik": s.get("metode_terbaik"),
-                     "RMSE": s.get("rmse_terbaik"), f"yoy {pr[0].get('periode', '')}": pr[0].get("yoy"), "Tanggal": tgl(r["created_at"])})
-    df = pd.DataFrame(rows)
-    ev = st.dataframe(df, hide_index=True, use_container_width=True, on_select="rerun", selection_mode="single-row",
-                      column_config={"RMSE": st.column_config.NumberColumn("RMSE ↓", format="%.3f", help=ui.g("RMSE"))})
-    st.caption("Klik baris untuk membuka detail run.")
-    sel = ev.selection.rows if ev and hasattr(ev, "selection") else []
-    if sel:
-        st.session_state["run_terpilih"] = runs[sel[0]]["id"]
-        st.rerun()
+        pr = s.get("proyeksi") or []
+        ut = _utama(s)
+        met = {m["metode"]: m for m in s.get("metrik", [])}
+        top = [m for m in (s.get("urutan") or list(met)) if m not in engine.BENCH][:3]
+        th = s.get("tahunan") or {}
+        yrs = [y for y in th if th[y] is not None][-2:]
+        with st.container(border=True):
+            a1, a2 = st.columns([5, 1])
+            a1.markdown(f"**{r.get('name')}**  \n<small>{tgl(r['created_at'])} · dataset {dsname.get(r.get('dataset_id'), '(dihapus)')}"
+                        + (f" · {r['note']}" if r.get("note") else "") + "</small>", unsafe_allow_html=True)
+            if a2.button("Buka →", key=f"buka_{r['id']}", use_container_width=True):
+                st.session_state["run_terpilih"] = r["id"]
+                st.rerun()
+            k = st.columns(4)
+            ui.kpi(k[0], "Metode utama", ut, f"RMSE {ui.fmt((met.get(ut) or {}).get('rmse', s.get('rmse_terbaik')), 3)}", ui.g("RMSE"))
+            if pr:
+                ui.kpi(k[1], f"yoy {pr[0].get('periode')}", ui.fmt(pr[0].get("yoy"), 2, True), f"target {s.get('target')}")
+            for i, y in enumerate(yrs):
+                ui.kpi(k[2 + i], f"Tumbuh {y}", ui.fmt(th[y], 2, True), f"proyeksi s.d. {s.get('proyeksi_sampai')}", ui.g("Pertumbuhan tahunan"))
+            ui.chips(["3 model terbaik: " + (", ".join(top) or "-"), "Indikator: " + (", ".join(s.get("indikator") or []) or "-"),
+                      f"Mode {s.get('mode')}"])
