@@ -1,0 +1,227 @@
+import pandas as pd
+import streamlit as st
+
+from core import nav, ui
+from core.common import daftar_dataset, daftar_run, file_bytes, tgl, uid
+from core.storage import get_backend
+
+GRAFIK = {
+    "01_data_historis.png": "Data historis dan hasil pembersihan outlier",
+    "02_proyeksi_semua_metode.png": "Proyeksi semua metode",
+    "03_fan_chart.png": "Proyeksi dengan selang kepercayaan (dua metode teratas)",
+    "04_perbandingan_error.png": "Perbandingan error backtest",
+    "05_rmse_per_horizon.png": "RMSE menurut horizon",
+    "06_backtest_h1.png": "Backtest 1 triwulan ke depan: aktual vs prediksi",
+    "07_pola_musiman_qtq.png": "Pola musiman (mode level)",
+}
+
+
+def _sheet(sheets, name, **kw):
+    if name in sheets:
+        df = sheets[name]
+        if str(df.columns[0]).startswith("Unnamed"):
+            df = df.rename(columns={df.columns[0]: "Periode" if name.startswith(("Proyeksi", "Series", "Data", "Variabel")) else ""})
+        ui.df_with_help(df, **kw)
+    else:
+        st.caption("Tidak tersedia untuk run ini.")
+
+
+def detail(run):
+    s = run.get("summary") or {}
+    st_ = run.get("settings") or {}
+    if st.button("← Semua run"):
+        st.session_state.pop("run_terpilih", None)
+        st.rerun()
+    info_waktu = f"selesai dalam {ui.fmt(s.get('durasi_detik'), 0)} detik" if s.get("durasi_detik") else (s.get("sumber") or "")
+    ui.header(f"Detail run · {tgl(run['created_at'])} · {info_waktu}", run.get("name", "Run"),
+              run.get("note") or None)
+    excel = file_bytes(run["excel_path"])
+    charts = ui.read_charts(file_bytes(run["charts_path"]))
+    b = st.columns([1, 1, 1, 3])
+    b[0].download_button("⬇ Unduh Excel", excel, f"{run.get('name', 'hasil')}.xlsx".replace("/", "-"),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+    b[1].download_button("⬇ Unduh grafik (.zip)", file_bytes(run["charts_path"]), "grafik.zip", "application/zip", use_container_width=True)
+    if b[2].button("↻ Jalankan ulang", use_container_width=True, help="Buka pengaturan run ini untuk dijalankan lagi, misalnya dengan data terbaru."):
+        st.session_state["prefill"] = {"dataset_id": run.get("dataset_id"), "settings": st_, "name": f"{run.get('name')} (ulang)", "note": run.get("note") or ""}
+        nav.go("jalankan")
+    ui.chips([f"Target: {s.get('target')}", f"Data {s.get('data_awal')} s.d. {s.get('data_akhir')}", f"Proyeksi s.d. {s.get('proyeksi_sampai')}",
+              f"Mode {s.get('mode')}", "Indikator: " + (", ".join(s.get("indikator", [])) or "-"),
+              f"{len(s.get('metode_aktif', []))} metode" + (" + Ensemble" if s.get("bobot_ensemble") else ""),
+              "Add-factor: " + (", ".join(f"{k} {v:+.2f}" for k, v in (st_.get("PENYESUAIAN") or {}).items() if v) or "tidak ada")])
+
+    sheets = ui.read_excel_sheets(excel)
+    tabs = st.tabs(["Ringkasan", "Proyeksi per metode", "Metrik error", "Backtest", "Musiman & jarak yoy", "Diagnostik", "Validasi data", "Pengaturan", "Semua grafik"])
+    best = s.get("metode_terbaik")
+    with tabs[0]:
+        k = st.columns(4)
+        th = s.get("tahunan", {})
+        yrs = [y for y in th if th[y] is not None][-2:]
+        for i, y in enumerate(yrs):
+            ui.kpi(k[i], f"Pertumbuhan {y}", ui.fmt(th[y], 2, True), "total 4 triwulan (aktual + proyeksi)" if s.get("mode") == "level" else "rata-rata yoy 4 triwulan",
+                   ui.g("Pertumbuhan tahunan"))
+        ui.kpi(k[2], f"RMSE {best}", ui.fmt(s.get("rmse_terbaik"), 3), f"peringkat 1 dari {len(s.get('metrik', []))}", ui.g("RMSE"))
+        ui.kpi(k[3], "Akurasi arah", ui.fmt(s.get("arah_terbaik"), 0, True), f"{s.get('jumlah_titik_uji')} titik uji", ui.g("Akurasi arah"))
+        l, r = st.columns([1.8, 1])
+        with l:
+            st.markdown(f"**Pertumbuhan yoy {s.get('label_target', '')}: aktual dan proyeksi {best}**")
+            ch = ui.chart_proyeksi(s)
+            if ch is not None:
+                st.altair_chart(ch, use_container_width=True)
+            st.caption("Garis hitam = aktual · garis hijau = proyeksi · area hijau muda = rentang kemungkinan (selang kepercayaan).")
+        with r:
+            st.markdown(f"**Proyeksi per triwulan ({best})**")
+            pr = pd.DataFrame(s.get("proyeksi", []))
+            if len(pr):
+                pr = pr.rename(columns={"periode": "Periode", "yoy": "yoy (%)", "lower": "Batas bawah", "upper": "Batas atas"})
+                st.dataframe(pr, hide_index=True, use_container_width=True,
+                             column_config={"yoy (%)": st.column_config.NumberColumn(format="%.2f", help=ui.g("yoy")),
+                                            "Batas bawah": st.column_config.NumberColumn(format="%.2f", help=ui.g("Selang kepercayaan")),
+                                            "Batas atas": st.column_config.NumberColumn(format="%.2f", help=ui.g("Selang kepercayaan"))})
+            if s.get("bobot_ensemble"):
+                st.markdown("**Bobot Ensemble**", help=ui.g("Bobot Ensemble"))
+                st.altair_chart(ui.chart_bobot(s["bobot_ensemble"]), use_container_width=True)
+    with tabs[1]:
+        st.markdown("**Proyeksi yoy semua metode (sudah termasuk add-factor)**")
+        _sheet(sheets, "Proyeksi_yoy")
+        st.markdown("**Proyeksi dengan selang kepercayaan**")
+        _sheet(sheets, "Proyeksi_dengan_CI")
+        st.markdown("**Pertumbuhan tahunan**", help=ui.g("Pertumbuhan tahunan"))
+        _sheet(sheets, "Pertumbuhan_Tahunan")
+        if "02_proyeksi_semua_metode.png" in charts:
+            st.image(charts["02_proyeksi_semua_metode.png"], use_container_width=True)
+        with st.expander("Proyeksi model murni (tanpa add-factor) dan level"):
+            _sheet(sheets, "Proyeksi_yoy_Model_Murni")
+            _sheet(sheets, "Proyeksi_Level")
+    with tabs[2]:
+        st.caption("↓ lower better (RMSE, MAE, sMAPE, MASE, Theil's U) · ↑ higher better (akurasi arah) · bias: makin dekat nol makin baik. Arahkan kursor ke judul kolom untuk penjelasan.")
+        _sheet(sheets, "Metrik_Error_Backtest")
+        st.markdown("**RMSE per horizon**", help=ui.g("Horizon (h)"))
+        _sheet(sheets, "RMSE_per_Horizon")
+        c1, c2 = st.columns(2)
+        for c, n in zip((c1, c2), ("04_perbandingan_error.png", "05_rmse_per_horizon.png")):
+            if n in charts:
+                c.image(charts[n], use_container_width=True)
+    with tabs[3]:
+        st.caption(ui.g("Backtest"))
+        if "06_backtest_h1.png" in charts:
+            st.image(charts["06_backtest_h1.png"], use_container_width=True)
+        with st.expander("Detail semua titik backtest"):
+            _sheet(sheets, "Detail_Backtest")
+    with tabs[4]:
+        for n, t in (("Cek_Q4_vs_Q3", "Cek Q4 dibanding Q3"), ("Pola_yoy_Historis", "Pola yoy historis per triwulan"), ("Cek_Jarak_yoy", "Jarak yoy antartriwulan"),
+                     ("Cek_Pola_Musiman", "Cek pola musiman (mode level)"), ("Proyeksi_qtq", "Proyeksi qtq (mode level)")):
+            if n in sheets:
+                st.markdown(f"**{t}**")
+                _sheet(sheets, n)
+        if "07_pola_musiman_qtq.png" in charts:
+            st.image(charts["07_pola_musiman_qtq.png"], use_container_width=True)
+    with tabs[5]:
+        _sheet(sheets, "Diagnostik_InSample")
+    with tabs[6]:
+        _sheet(sheets, "Validasi_Data")
+        st.markdown("**Log pembersihan outlier**", help=ui.g("Bersihkan outlier"))
+        _sheet(sheets, "Log_Pembersihan")
+        if "01_data_historis.png" in charts:
+            st.image(charts["01_data_historis.png"], use_container_width=True)
+    with tabs[7]:
+        _sheet(sheets, "Pengaturan")
+        _sheet(sheets, "Penjelasan_Metode")
+    with tabs[8]:
+        for n, img in charts.items():
+            st.markdown(f"**{GRAFIK.get(n, n)}**")
+            st.image(img, use_container_width=True)
+
+    with st.expander("Hapus run ini"):
+        if st.button("Hapus permanen", type="secondary"):
+            be = get_backend()
+            be.delete_file(run["excel_path"])
+            be.delete_file(run["charts_path"])
+            be.delete("runs", uid(), run["id"])
+            st.session_state.pop("run_terpilih", None)
+            st.rerun()
+
+
+def impor_colab():
+    with st.expander("⬆ Impor hasil run dari Google Colab (.zip)", expanded=not st.session_state.get("_ada_run", True)):
+        st.caption("Unggah zip hasil notebook Colab (berisi hasil_proyeksi.xlsx dan grafik PNG). Bila di dalam zip ada file data "
+                   "(mis. Indikator_Makroekonomi_DIY.xlsx), file itu ikut disimpan sebagai dataset. Run langsung masuk riwayat tanpa dijalankan ulang.")
+        up = st.file_uploader("Zip hasil Colab", type=["zip"], key="impor_zip", label_visibility="collapsed")
+        if not up:
+            return
+        from core import impor
+        import hashlib
+        raw = up.getvalue()
+        h = hashlib.md5(raw).hexdigest()
+        if st.session_state.get("impor_hash") == h:
+            st.success("Zip ini sudah diimpor.")
+            return
+        try:
+            isi = impor.baca_zip(raw)
+            summary, settings = impor.ringkasan_dari_excel(isi["excel"])
+        except ValueError as e:
+            st.error(str(e))
+            return
+        dres = impor.cek_data(isi["data_bytes"])
+        st.markdown(f"**Terbaca:** target {summary['target']}, data {summary['data_awal']} s.d. {summary['data_akhir']}, proyeksi s.d. "
+                    f"{summary['proyeksi_sampai']}, metode terbaik {summary['metode_terbaik']} (RMSE {ui.fmt(summary['rmse_terbaik'], 3)}). "
+                    + (f"File data **{isi['data_name']}** ikut disimpan sebagai dataset." if dres else "Tidak ada file data yang valid di zip; run disimpan tanpa dataset."))
+        c1, c2 = st.columns([1, 1.4])
+        base = isi["data_name"].rsplit(".", 1)[0].replace("_", " ") if isi["data_name"] else summary["target"]
+        nama = c1.text_input("Nama run", value=f"{base} · hasil Colab")
+        note = c2.text_input("Catatan", value="diimpor dari Google Colab")
+        if st.button("Simpan ke riwayat", type="primary"):
+            from core.common import now_iso
+            from core.storage import new_id
+            be = get_backend()
+            ds_id = None
+            if dres:
+                ds_id = new_id()
+                dp = f"{uid()}/datasets/{ds_id}.xlsx"
+                be.put_file(dp, isi["data_bytes"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                row = {"id": ds_id, "user_id": uid(), "name": isi["data_name"].rsplit(".", 1)[0].replace("_", " "), "filename": isi["data_name"],
+                       "sheet": dres["sheet"], "storage_path": dp, "info": dres["info"], "labels": dres["labels"], "created_at": now_iso()}
+                be.insert("datasets", row)
+                st.session_state["dataset_aktif"] = row
+            rid = new_id()
+            xp, cp = f"{uid()}/runs/{rid}/hasil_proyeksi.xlsx", f"{uid()}/runs/{rid}/grafik.zip"
+            be.put_file(xp, isi["excel"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            be.put_file(cp, isi["charts_zip"], "application/zip")
+            be.insert("runs", {"id": rid, "user_id": uid(), "dataset_id": ds_id, "name": nama.strip() or "Hasil Colab", "note": note.strip(),
+                               "settings": settings, "summary": summary, "status": "diimpor", "excel_path": xp, "charts_path": cp,
+                               "created_at": now_iso()})
+            st.session_state["impor_hash"] = h
+            st.session_state["run_terpilih"] = rid
+            st.rerun()
+
+
+def show():
+    runs = daftar_run()
+    st.session_state["_ada_run"] = bool(runs)
+    rid = st.session_state.get("run_terpilih")
+    if rid:
+        run = next((r for r in runs if r["id"] == rid), None)
+        if run:
+            detail(run)
+            return
+        st.session_state.pop("run_terpilih", None)
+    ui.header("Semua run", "Riwayat Run")
+    impor_colab()
+    if not runs:
+        st.info("Belum ada run. Buat di menu **Jalankan Proyeksi**, atau impor hasil dari Google Colab.")
+        return
+    dsname = {d["id"]: d["name"] for d in daftar_dataset()}
+    rows = []
+    for r in runs:
+        s = r.get("summary") or {}
+        pr = s.get("proyeksi") or [{}]
+        rows.append({"Nama run": r.get("name"), "Catatan": r.get("note") or "", "Dataset": dsname.get(r.get("dataset_id"), "(dihapus)"),
+                     "Target": s.get("target"), "Proyeksi s.d.": s.get("proyeksi_sampai"), "Terbaik": s.get("metode_terbaik"),
+                     "RMSE": s.get("rmse_terbaik"), f"yoy {pr[0].get('periode', '')}": pr[0].get("yoy"), "Tanggal": tgl(r["created_at"])})
+    df = pd.DataFrame(rows)
+    ev = st.dataframe(df, hide_index=True, use_container_width=True, on_select="rerun", selection_mode="single-row",
+                      column_config={"RMSE": st.column_config.NumberColumn("RMSE ↓", format="%.3f", help=ui.g("RMSE"))})
+    st.caption("Klik baris untuk membuka detail run.")
+    sel = ev.selection.rows if ev and hasattr(ev, "selection") else []
+    if sel:
+        st.session_state["run_terpilih"] = runs[sel[0]]["id"]
+        st.rerun()

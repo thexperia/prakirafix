@@ -1,0 +1,70 @@
+{
+ "Istilah umum": {
+  "PDRB": "Produk Domestik Regional Bruto: total nilai barang dan jasa yang dihasilkan di suatu daerah. Ukuran utama kinerja ekonomi daerah.",
+  "ADHK": "Atas Dasar Harga Konstan: PDRB dihitung dengan harga tahun dasar, sehingga pertumbuhannya mencerminkan pertumbuhan riil (tanpa efek inflasi).",
+  "yoy": "Year on year: pertumbuhan dibanding triwulan yang sama tahun sebelumnya. Contoh: 5,70% di Tw III 2026 berarti lebih besar 5,70% dari Tw III 2025.",
+  "Target": "Kolom yang ingin diproyeksi, biasanya pertumbuhan PDRB (% yoy).",
+  "Kolom level": "Kolom nilai PDRB dalam rupiah (bukan persen), misalnya PDRB ADHK. Opsional. Bila ada, aplikasi memakai mode level untuk menangkap pola musiman.",
+  "Mode level": "Mode yang memakai kolom level PDRB sehingga pola musiman (Lebaran, akhir tahun) ikut dimodelkan. Aktif bila kolom level dipilih.",
+  "Mode yoy": "Mode yang hanya memakai data pertumbuhan yoy. Dipakai bila tidak ada kolom level.",
+  "Indikator pendukung": "Data lain yang diduga ikut menggerakkan PDRB, misalnya PDB nasional atau konsumsi semen. Dipakai metode multivariat, regresi, dan machine learning.",
+  "Korelasi": "Seberapa searah dua data bergerak, skala -1 s.d. 1. Mendekati 1 = searah kuat, mendekati 0 = tidak berhubungan, negatif = berlawanan arah.",
+  "Korelasi tanpa pandemi": "Korelasi yang dihitung tanpa periode 2020 s.d. 2021. Berguna untuk menghindari korelasi semu karena semua indikator sama-sama anjlok saat pandemi.",
+  "Triwulan (Tw)": "Periode tiga bulan. Q1 = Januari s.d. Maret, Q2 = April s.d. Juni, Q3 = Juli s.d. September, Q4 = Oktober s.d. Desember.",
+  "Efek basis": "Pertumbuhan yoy bisa terlihat rendah bila triwulan yang sama tahun lalu sudah tumbuh tinggi (pembandingnya berat), dan sebaliknya.",
+  "Pertumbuhan tahunan": "Pertumbuhan satu tahun penuh. Mode level: dari total PDRB empat triwulan dibanding tahun sebelumnya. Mode yoy: rata-rata yoy empat triwulan (pendekatan)."
+ },
+ "Pengaturan": {
+  "Data mulai / Data sampai": "Rentang data yang dipakai model. Isi Data sampai lebih awal dari data terakhir untuk uji coba: hasil proyeksi akan dibandingkan dengan data aktual sesudahnya.",
+  "Proyeksi sampai": "Periode terakhir yang ingin diproyeksi.",
+  "Penanda pandemi": "Tanda khusus (dummy) untuk periode pandemi 2020 dan pemulihan 2021, supaya guncangan itu tidak dianggap pola normal.",
+  "Efek Ramadan dan Lebaran": "Menghitung porsi hari puasa dan libur Lebaran (H-10 s.d. H+7) serta Idul Adha di tiap triwulan, sehingga model tahu saat Lebaran berpindah triwulan.",
+  "Bersihkan outlier": "Nilai indikator pendukung yang terlalu ekstrem dipangkas ke batas wajar (winsorize). Target tidak diubah.",
+  "Outlier": "Nilai yang jauh di luar kebiasaan data, misalnya lonjakan ratusan persen saat pemulihan pandemi.",
+  "Batas lompatan yoy": "Proyeksi yoy tidak boleh berubah lebih dari batas ini dari satu triwulan ke triwulan berikutnya. Otomatis = persentil 90 perubahan historis di luar pandemi.",
+  "Selang kepercayaan": "Lebar rentang kemungkinan hasil proyeksi. 90% berarti angka aktual diperkirakan jatuh di dalam rentang dengan keyakinan 90%.",
+  "Add-factor": "Penyesuaian manual dalam poin persen yoy untuk triwulan tertentu, berdasarkan judgment analis (misalnya efek HBKN atau Nataru). Berlaku untuk semua metode; hasil model murni tetap disimpan.",
+  "Mode cepat": "Backtest dijalankan 6 kali (bukan 12) supaya lebih cepat. Cocok untuk coba-coba; untuk hasil final pakai mode lengkap.",
+  "Indikator VAR/BVAR": "Indikator yang ikut dimodelkan bersama target di metode VAR dan BVAR. Sebaiknya 1 s.d. 2 indikator yang paling berhubungan."
+ },
+ "Metode": {
+  "Naive": "Benchmark: proyeksi = pertumbuhan terakhir diulang terus. Pembanding paling sederhana; garis datar memang definisinya.",
+  "Rata-rata 8Q": "Benchmark: proyeksi = rata-rata 8 triwulan terakhir.",
+  "ARIMA": "Membaca pola naik turun target di masa lalu (autoregresi dan moving average). Tidak memakai indikator lain.",
+  "ETS": "Exponential smoothing: data terbaru diberi bobot lebih besar. Cocok untuk data yang bergerak landai.",
+  "Theta": "Menggabungkan garis tren jangka panjang dengan smoothing. Sederhana tapi sering sulit dikalahkan untuk data pendek.",
+  "ARIMAX": "ARIMA ditambah indikator pendukung. Indikator dipilih dari korelasi di luar pandemi (maksimal 3).",
+  "VAR": "Vector Autoregression: target dan indikator saling memengaruhi dari waktu ke waktu.",
+  "BVAR": "VAR versi Bayesian (prior Minnesota): koefisien ditarik ke nilai wajar, sehingga lebih stabil walau data pendek.",
+  "Ridge": "Regresi linier dengan 'rem' (regularisasi) supaya tidak berlebihan mengikuti data.",
+  "Elastic Net": "Regresi yang otomatis membuang indikator yang lemah (koefisiennya dibuat nol).",
+  "Faktor (PCA)": "Banyak indikator diringkas menjadi beberapa faktor bersama, lalu faktor dipakai memproyeksi target.",
+  "Random Forest": "Machine learning berbasis banyak pohon keputusan. Bisa menangkap hubungan yang tidak lurus.",
+  "Gradient Boosting": "Machine learning yang membangun pohon keputusan secara bertahap, tiap pohon memperbaiki kesalahan sebelumnya.",
+  "SARIMA Musiman": "Mode level: SARIMA pada log PDRB level dengan komponen musiman triwulanan dan variabel kalender Lebaran.",
+  "ETS Musiman": "Mode level: Holt-Winters pada log PDRB level. Default mati karena pola musiman berubah setelah pandemi.",
+  "Ensemble": "Gabungan metode non-benchmark. Bobot bawaan sesuai akurasi backtest (inverse-RMSE); bisa juga hanya N terbaik atau median."
+ },
+ "Evaluasi dan metrik": {
+  "Backtest": "Uji mundur: model dilatih dengan data sampai titik tertentu, lalu proyeksinya dicocokkan dengan data aktual sesudahnya. Diulang beberapa kali (bawaan 12).",
+  "Out-of-sample": "Dinilai dengan data yang tidak dipakai saat model dilatih, sehingga menggambarkan akurasi proyeksi sungguhan.",
+  "Horizon (h)": "Berapa triwulan ke depan yang diproyeksi. h=1 berarti satu triwulan ke depan.",
+  "RMSE": "Root Mean Squared Error: akar rata-rata kuadrat selisih proyeksi dan aktual (poin persen). Kesalahan besar dihukum lebih berat. Lower better.",
+  "MAE": "Mean Absolute Error: rata-rata selisih absolut proyeksi dan aktual (poin persen). Lower better.",
+  "ME (bias)": "Rata-rata selisih aktual dikurangi proyeksi. Positif = proyeksi cenderung terlalu rendah, negatif = terlalu tinggi. Makin dekat nol makin baik.",
+  "sMAPE": "Kesalahan dalam persen relatif terhadap besarnya nilai. Lower better.",
+  "MASE": "Kesalahan dibanding rata-rata perubahan historis. Di bawah 1 = lebih baik dari tebakan sederhana. Lower better.",
+  "Theil's U": "Rasio RMSE metode terhadap RMSE tebakan naive. Di bawah 1 = lebih baik dari naive. Lower better.",
+  "Akurasi arah": "Persentase tebakan arah (naik atau turun) yang benar. Higher better.",
+  "Coverage CI": "Persentase angka aktual yang jatuh di dalam selang kepercayaan. Makin dekat ke level selang (misalnya 90%) makin baik.",
+  "Uji Diebold-Mariano (DM)": "Uji statistik apakah beda akurasi dua metode nyata. p-value < 0,05 = bedanya signifikan.",
+  "Bobot Ensemble": "Porsi tiap metode dalam gabungan Ensemble. Metode dengan error backtest lebih kecil mendapat porsi lebih besar."
+ },
+ "Diagnostik": {
+  "R2": "Seberapa besar variasi data dijelaskan model di data latih (0 s.d. 1). Tinggi belum tentu proyeksinya bagus; tetap lihat metrik backtest.",
+  "AIC / BIC": "Ukuran keseimbangan antara ketepatan dan kerumitan model. Lower better, hanya untuk membandingkan model sejenis.",
+  "Ljung-Box": "Uji apakah sisa kesalahan model masih berpola. p > 0,05 = sisa kesalahan acak (bagus).",
+  "Jarque-Bera": "Uji apakah sisa kesalahan model berdistribusi normal. p > 0,05 = normal.",
+  "ADF / stasioner": "Uji apakah data punya rata-rata dan variasi yang stabil dari waktu ke waktu. p < 0,05 = stasioner."
+ }
+}
