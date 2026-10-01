@@ -85,6 +85,20 @@ def ringkasan_dari_excel(excel):
         "urutan": list(met["Metode"]), "bobot_ensemble": {r["Metode"]: _f(r["Bobot"]) for _, r in bob.iterrows()} if len(bob) else {},
         "durasi_detik": None, "sumber": "impor Google Colab",
     }
+    # informasi tambahan notebook v5 (bila ada)
+    otom = [c.strip() for c in peng.get("Penyesuaian otomatis", "-").split(";") if c.strip() and c.strip() != "-"]
+    lewat = peng.get("Metode dilewati", "-")
+    summary.update({
+        "krisis_ringkas": peng.get("Triwulan krisis (dummy)"), "info_krisis": peng.get("Deteksi krisis"),
+        "sumber_yoy": peng.get("Sumber yoy target"),
+        "catatan_otomatis": [c for c in otom if not c.lower().startswith(("data pendek", "backtest hanya"))],
+        "peringatan": [c for c in otom if c.lower().startswith(("data pendek", "backtest hanya"))],
+        "alasan_dilewati": dict(re.findall(r"([^;()]+?) \(([^)]*)\)", lewat)) if lewat not in ("-", "nan") else {},
+        "var_variabel": [v.strip() for v in peng.get("VAR/BVAR (variabel)", "").split(",") if v.strip()],
+    })
+    summary["alasan_dilewati"] = {k.strip(): v for k, v in summary["alasan_dilewati"].items()}
+    summary["dilewati"] = list(summary["alasan_dilewati"])
+    summary = {k: v for k, v in summary.items() if v not in (None, "nan")}
     # pengaturan untuk tombol "Jalankan ulang"
     af = {}
     for part in peng.get("PENYESUAIAN (pp yoy)", "").split(","):
@@ -95,7 +109,10 @@ def ringkasan_dari_excel(excel):
             except ValueError:
                 pass
     var = [s.strip() for s in peng.get("VAR/BVAR (variabel)", "").split(",") if s.strip() and s.strip() != target]
+    if peng.get("VAR_INDIKATOR", "").strip() == "otomatis":
+        var = "otomatis"
     batas = peng.get("Batas perubahan yoy antarkuartal", "otomatis")
+    angka = re.search(r"-?\d+(?:\.\d+)?", batas)
     settings = {
         "TARGET": target, "TARGET_LEVEL": lvl.group(1) if lvl else None, "DATA_MULAI": peng.get("DATA_MULAI"),
         "PROYEKSI_SAMPAI": peng.get("PROYEKSI_SAMPAI"), "INDIKATOR_DIPAKAI": ind, "VAR_INDIKATOR": var,
@@ -103,9 +120,25 @@ def ringkasan_dari_excel(excel):
         "ENSEMBLE_CARA": peng.get("ENSEMBLE_CARA", "inverse-rmse"), "PAKAI_DUMMY_PANDEMI": peng.get("PAKAI_DUMMY_PANDEMI") == "True",
         "PAKAI_EFEK_KALENDER": peng.get("PAKAI_EFEK_KALENDER") == "True", "BERSIHKAN_OUTLIER": peng.get("BERSIHKAN_OUTLIER") == "True",
         "SELANG_KEPERCAYAAN": int(re.sub(r"\D", "", peng.get("SELANG_KEPERCAYAAN", "90")) or 90),
-        "BATAS_PERUBAHAN_YOY": "otomatis" if "otomatis" in batas else (None if "tidak" in batas else batas),
-        "PENYESUAIAN": af, "_cepat": peng.get("JUMLAH_UJI_BACKTEST") not in ("12", None),
+        "BATAS_PERUBAHAN_YOY": "otomatis" if "otomatis" in batas else (None if "tidak" in batas or not angka else float(angka.group())),
+        "PENYESUAIAN": af, "_cepat": False,
+        "JUMLAH_UJI_BACKTEST": "otomatis" if any(c.startswith("jumlah backtest") for c in otom) or not str(peng.get("JUMLAH_UJI_BACKTEST", "")).isdigit()
+        else int(peng["JUMLAH_UJI_BACKTEST"]),
     }
+    kal = [x.strip() == "True" for x in peng.get("Ramadan / Idul Fitri / Idul Adha", peng.get("Ramadan / Lebaran / Idul Adha", "")).split("/")]
+    if len(kal) == 3:
+        settings.update({"PAKAI_RAMADAN": kal[0], "PAKAI_IDUL_FITRI": kal[1], "PAKAI_IDUL_ADHA": kal[2]})
+    dk = peng.get("Deteksi krisis", "")
+    if dk.startswith("manual"):
+        rg = []
+        for part in peng.get("Triwulan krisis (dummy)", "").split(","):
+            ab = [x.strip() for x in part.split("s.d.")]
+            if ab[0] and re.match(r"^\d{4}Q[1-4]$", ab[0]):
+                rg.append((ab[0], ab[-1]))
+        if rg:
+            settings.update({"DETEKSI_KRISIS": "manual", "PERIODE_KRISIS": [list(r) for r in rg]})
+    elif dk:
+        settings["DETEKSI_KRISIS"] = "otomatis"
     if settings["METODE"].get("SARIMA Musiman") is False and "ETS Musiman" not in aktif:
         pass
     return summary, settings

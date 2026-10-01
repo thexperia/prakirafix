@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from openpyxl.utils import get_column_letter
 
-MIN_OBS = 24
+MIN_OBS = 3      # sama dengan mesin proyeksi v5: data pendek tetap jalan, dengan peringatan
 Q_OK = {"Q1", "Q2", "Q3", "Q4"}
 
 
@@ -127,10 +127,11 @@ def periksa(file_bytes):
             warnings.append({"lokasi": c, "pesan": f"Kemungkinan ada outlier: {len(out)} nilai, misalnya {contoh}."})
     nmax = int(df.notna().sum().max())
     if nmax < MIN_OBS:
-        errors.append({"lokasi": "Data", "pesan": f"Data terlalu pendek ({nmax} triwulan). Minimal {MIN_OBS} triwulan agar model bisa diuji."})
+        errors.append({"lokasi": "Data", "pesan": f"Data hanya {nmax} triwulan. Minimal {MIN_OBS} triwulan supaya ada yang bisa diproyeksi."})
         return res
     if nmax < 30:
-        warnings.append({"lokasi": "Data", "pesan": f"Data {nmax} triwulan. Jumlah uji backtest akan dikurangi otomatis."})
+        warnings.append({"lokasi": "Data", "pesan": f"Data {nmax} triwulan (pendek). Proyeksi tetap bisa dijalankan; jumlah backtest dan "
+                                                   "kerumitan model dikurangi otomatis, dan hasil uji akurasinya kurang andal."})
 
     res.update(ok=True, df=df, labels=labels, info={
         "periode_awal": str(df.index[0]), "periode_akhir": str(last_all), "n_obs": int(len(df.loc[:last_all])),
@@ -159,3 +160,80 @@ def deteksi_outlier(s, batas=4.0):
         return x.iloc[0:0]
     z = (x - med) / mad
     return x[z.abs() > batas]
+
+
+# ---- Fungsi bantu yang meniru aturan otomatis mesin proyeksi v5 (untuk pratinjau di halaman Jalankan) ----
+def yoy_target(df, target, level=None):
+    """Yoy target seperti di mesin: dari level bila ada, triwulan awal yang belum punya level t-4 memakai kolom target."""
+    y = df[target] if target in df else pd.Series(np.nan, index=df.index)
+    if level and level in df:
+        lv = df[level]
+        y_lv = (lv / lv.shift(4) - 1) * 100
+        y = y_lv.combine_first(y)
+    return y
+
+
+def deteksi_krisis(y, jendela=("2020Q1", "2022Q4"), ambang=2.0):
+    """Triwulan di jendela yang yoy-nya menyimpang > ambang x sd dari median periode normal.
+    Mengembalikan (daftar triwulan krisis, rentang krisis, keterangan)."""
+    y = y.dropna()
+    w = set(pd.period_range(pd.Period(jendela[0], "Q"), pd.Period(jendela[1], "Q"), freq="Q"))
+    norm = y[[p not in w for p in y.index]]
+    if len(norm) < 8:
+        return None, None, "data periode normal kurang dari 8 triwulan, deteksi otomatis memakai daftar manual"
+    med, sd = norm.median(), max(norm.std(), 0.1)
+    cand = y[[p in w for p in y.index]]
+    kr = sorted(cand[(cand - med).abs() > ambang * sd].index)
+    span = list(pd.period_range(kr[0], kr[-1], freq="Q")) if kr else []
+    return kr, span, f"median normal {med:.2f}%, simpangan baku {sd:.2f} poin"
+
+
+def ringkas_periode(ps):
+    ps = sorted(ps)
+    if not ps:
+        return "tidak ada"
+    out, a, b = [], ps[0], ps[0]
+    for p in ps[1:]:
+        if p == b + 1:
+            b = p
+        else:
+            out.append(str(a) if a == b else f"{a} s.d. {b}")
+            a = b = p
+    out.append(str(a) if a == b else f"{a} s.d. {b}")
+    return ", ".join(out)
+
+
+def batas_outlier(s, span_krisis, k=4.0):
+    """Batas wajar indikator seperti mesin v5: median & skala dari periode normal, skala = max(1,4826 x MAD, sd)."""
+    x = s.dropna()
+    nm = x[[p not in span_krisis for p in x.index]]
+    if len(nm) < 8:
+        nm = x
+    if len(nm) < 3:
+        return None, None
+    med = nm.median()
+    skala = max(1.4826 * (nm - med).abs().median(), nm.std())
+    if not skala > 0:
+        return None, None
+    return med - k * skala, med + k * skala
+
+
+def rencana_backtest(n_obs, manual=None):
+    """Jumlah backtest & data latih awal seperti mesin v5. Mengembalikan (N, min_train, daftar peringatan)."""
+    warn = []
+    if manual is None or str(manual).lower() == "otomatis":
+        min_train = 16 if n_obs >= 29 else max(2, int(np.ceil(n_obs * 0.55)))
+        n = int(max(1, min(12, n_obs - min_train - 1)))
+    else:
+        n = int(manual)
+        if n_obs - n - 1 < 4:
+            baru = int(max(1, n_obs - 5))
+            warn.append(f"Backtest {n} kali terlalu banyak untuk {n_obs} triwulan, dikurangi jadi {baru}.")
+            n = baru
+        min_train = n_obs - n - 1
+    if min_train >= 12 and n < 8:
+        warn.append(f"Backtest hanya {n} kali: peringkat metode dan bobot Ensemble kurang kokoh. Untuk hasil final gunakan jumlah backtest otomatis.")
+    elif min_train < 12 or n < 8:
+        warn.append(f"Data pendek ({n_obs} triwulan): backtest {n} kali dengan data latih awal {min_train} triwulan. "
+                    "Proyeksi tetap dibuat, tetapi peringkat metode kurang andal. Utamakan Ensemble atau metode sederhana.")
+    return n, min_train, warn

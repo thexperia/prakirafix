@@ -40,6 +40,29 @@ def _spesifikasi(s, sheets):
     return sp
 
 
+def catatan_otomatis(s):
+    """Hal yang disesuaikan otomatis oleh mesin v5: triwulan krisis, peringatan data pendek, metode dilewati/tersaring."""
+    baris = []
+    if s.get("krisis_ringkas"):
+        baris.append(f"<b>Triwulan krisis</b>: {s['krisis_ringkas']}" + (f" <small>({s['info_krisis']})</small>" if s.get("info_krisis") else ""))
+    if s.get("jumlah_backtest"):
+        baris.append(f"<b>Backtest</b>: {s['jumlah_backtest']} titik uji")
+    if s.get("sumber_yoy"):
+        baris.append(f"<b>Sumber yoy target</b>: {s['sumber_yoy']}")
+    if len(s.get("var_variabel") or []) > 1:
+        baris.append(f"<b>Variabel VAR/BVAR</b>: {', '.join(s['var_variabel'])}")
+    if s.get("ensemble_disaring"):
+        baris.append(f"<b>Tidak ikut Ensemble</b> (RMSE jauh di atas tebakan naive): {', '.join(s['ensemble_disaring'])}")
+    for m, a in (s.get("alasan_dilewati") or {}).items():
+        baris.append(f"<b>{m} dilewati</b>: {a}")
+    lain = [c for c in s.get("catatan_otomatis") or [] if not c.startswith(("triwulan krisis", "jumlah backtest"))]
+    baris += [f"Otomatis: {c}" for c in lain]
+    if baris:
+        st.markdown('<div class="msg-info">' + "<br>".join(baris) + "</div>", unsafe_allow_html=True)
+    for w in s.get("peringatan") or []:
+        st.markdown(f'<div class="msg-warn"><b>Peringatan</b><br>{w}</div>', unsafe_allow_html=True)
+
+
 def ringkasan(s, sheets):
     met = sheets.get("Metrik_Error_Backtest")
     urut = list(met["Metode"]) if met is not None else [m["metode"] for m in s.get("metrik", [])]
@@ -77,6 +100,7 @@ def ringkasan(s, sheets):
         ui.kpi(k[3], "Akurasi arah", ui.fmt(r.get("Akurasi arah (%)"), 0, True) if pd.notna(r.get("Akurasi arah (%)")) else "-",
                f"{int(r.get('Jumlah titik uji', 0) or 0)} titik uji", ui.g("Akurasi arah"))
 
+    ui.gap("s")
     # ---- grafik besar + tabel per triwulan
     l, rcol = st.columns([2.2, 1])
     ser, ci = sheets.get("Series_Aktual_Proyeksi"), sheets.get("Proyeksi_dengan_CI")
@@ -111,6 +135,7 @@ def ringkasan(s, sheets):
             st.caption(f"Spesifikasi {sorot}: {sp}")
 
     # ---- rangkuman model
+    ui.gap("m")
     st.markdown("#### Rangkuman model")
     if met is not None:
         nonb = met[~met["Metode"].isin(engine.BENCH)]
@@ -167,7 +192,7 @@ def detail(run):
               run.get("note") or None)
     excel = file_bytes(run["excel_path"])
     charts = ui.read_charts(file_bytes(run["charts_path"]))
-    b = st.columns([1, 1, 1, 3])
+    b = st.columns([1.3, 1.3, 1.3, 2])
     b[0].download_button("⬇ Unduh Excel", excel, f"{run.get('name', 'hasil')}.xlsx".replace("/", "-"),
                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
     b[1].download_button("⬇ Grafik (.zip)", file_bytes(run["charts_path"]), "grafik.zip", "application/zip", use_container_width=True)
@@ -178,6 +203,8 @@ def detail(run):
               f"Mode {s.get('mode')}", "Indikator: " + (", ".join(s.get("indikator", [])) or "-"),
               f"{len(s.get('metode_aktif', []))} metode" + (" + Ensemble" if s.get("bobot_ensemble") else ""),
               "Add-factor: " + (", ".join(f"{k} {v:+.2f}" for k, v in (st_.get("PENYESUAIAN") or {}).items() if v) or "tidak ada")])
+    ui.gap("s")
+    catatan_otomatis(s)
 
     sheets = ui.read_excel_sheets(excel)
     tabs = st.tabs(["Ringkasan", "Proyeksi per metode", "Metrik error", "Backtest", "Musiman & jarak yoy", "Diagnostik", "Validasi data", "Pengaturan", "Semua grafik"])
@@ -200,6 +227,9 @@ def detail(run):
         _sheet(sheets, "Metrik_Error_Backtest")
         st.markdown("**RMSE per horizon**", help=ui.g("Horizon (h)"))
         _sheet(sheets, "RMSE_per_Horizon")
+        if "Peringkat_per_Horizon" in sheets:
+            st.markdown("**Peringkat per horizon**", help="Urutan metode menurut RMSE pada tiap horizon. Metode terbaik untuk 1 triwulan ke depan bisa berbeda dengan 4 triwulan ke depan.")
+            _sheet(sheets, "Peringkat_per_Horizon")
         c1, c2 = st.columns(2)
         for c, n in zip((c1, c2), ("04_perbandingan_error.png", "05_rmse_per_horizon.png")):
             if n in charts:
@@ -325,7 +355,7 @@ def show():
         th = s.get("tahunan") or {}
         yrs = [y for y in th if th[y] is not None][-2:]
         with st.container(border=True):
-            a1, a2 = st.columns([5, 1])
+            a1, a2 = st.columns([4.2, 1])
             a1.markdown(f"**{r.get('name')}**  \n<small>{tgl(r['created_at'])} · dataset {dsname.get(r.get('dataset_id'), '(dihapus)')}"
                         + (f" · {r['note']}" if r.get("note") else "") + "</small>", unsafe_allow_html=True)
             if a2.button("Buka →", key=f"buka_{r['id']}", use_container_width=True):

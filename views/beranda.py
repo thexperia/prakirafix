@@ -27,12 +27,13 @@ def show():
         ui.kpi(c[2], "Run terakhir", "-", "belum ada run")
         ui.kpi(c[3], "Metode utama", "-", "")
 
-    b1, b2, _ = st.columns([1, 1, 3])
+    b1, b2, _ = st.columns([1.5, 1.2, 2.3])
     if b1.button("▶ Jalankan proyeksi baru", type="primary", use_container_width=True):
         nav.go("jalankan")
     if b2.button("⬆ Unggah data", use_container_width=True):
         nav.go("data")
 
+    ui.gap("m")
     if not dsets and not runs:
         st.info("Belum ada dataset. Mulai dari menu **Data**: unduh template, isi, lalu unggah. Punya hasil run dari Google Colab? Impor di menu **Riwayat Run**.")
         return
@@ -72,6 +73,7 @@ def show():
                             unsafe_allow_html=True)
             st.caption("Data tersimpan di akunmu dan otomatis tersedia di sesi berikutnya.")
 
+    ui.gap("m")
     st.subheader("Riwayat run")
     if not runs:
         st.caption("Belum ada run.")

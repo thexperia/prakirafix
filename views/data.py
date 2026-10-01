@@ -28,8 +28,9 @@ def pratinjau(res, key):
     c = st.columns(4)
     ui.kpi(c[0], "Periode", f"{info['periode_awal']} s.d. {info['periode_akhir']}")
     ui.kpi(c[1], "Jumlah triwulan", info["n_obs"])
-    ui.kpi(c[2], "Kolom", len(info["kolom"]), ", ".join(info["kolom"][:4]) + (" …" if len(info["kolom"]) > 4 else ""))
+    ui.kpi(c[2], "Kolom", len(info["kolom"]), ", ".join(info["kolom"][:3]) + (" …" if len(info["kolom"]) > 3 else ""))
     ui.kpi(c[3], "Sel kosong", info["sel_kosong"], "diisi otomatis saat proyeksi" if info["sel_kosong"] else "")
+    ui.gap("s")
     t1, t2, t3 = st.tabs(["Tabel", "Grafik", "Statistik per kolom"])
     with t1:
         show = df.copy()
@@ -59,8 +60,8 @@ def show():
     ui.header("Kelola dataset", "Data", "Unduh template, isi, unggah, lalu cek hasilnya sebelum dipakai.")
     s = st.columns(4)
     for col, (n, t) in zip(s, [("1", "Unduh template"), ("2", "Isi data di Excel"), ("3", "Unggah file"), ("4", "Cek dan simpan")]):
-        col.markdown(f'<div class="kpi"><div class="v" style="font-size:20px">{n}. {t}</div></div>', unsafe_allow_html=True)
-    st.write("")
+        col.markdown(f'<div class="step"><span class="n">{n}</span><span>{t}</span></div>', unsafe_allow_html=True)
+    ui.gap("s")
 
     a, b = st.columns([1, 1.4])
     with a:
@@ -70,7 +71,8 @@ def show():
 - Baris 1: nama indikator, baris 2: kode (mis. GPDRB)
 - Kolom A: tahun, kolom B: triwulan (Q1 s.d. Q4)
 - Isi pertumbuhan dalam **% yoy**; kolom level PDRB opsional
-- Sel yang belum ada datanya dibiarkan **kosong**, jangan diisi 0""")
+- Sel yang belum ada datanya dibiarkan **kosong**, jangan diisi 0
+- Disarankan minimal 30 triwulan. Data lebih pendek tetap bisa, dengan peringatan""")
             st.download_button("⬇ Unduh template (.xlsx)", _template(), "template_proyeksi_pdrb.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
     with b:
@@ -104,6 +106,7 @@ def show():
                         st.session_state["tersimpan_hash"] = h
                         st.rerun()
 
+    ui.gap("m")
     if st.session_state.pop("dataset_baru", None):
         st.success("Dataset tersimpan dan dijadikan dataset aktif. Lanjut ke **Jalankan Proyeksi** kapan saja.")
 
@@ -121,7 +124,8 @@ def show():
         if res["ok"]:
             pratinjau(res, pilih["id"])
         tampil_pesan(res)
-        c1, c2, c3, _ = st.columns([1.3, 1.3, 1, 2])
+        ui.gap("s")
+        c1, c2, c3, _ = st.columns([1.5, 1.5, 1, 1.6])
         if c1.button("✔ Jadikan dataset aktif", use_container_width=True):
             st.session_state["dataset_aktif"] = pilih
             st.rerun()
@@ -132,7 +136,7 @@ def show():
             st.session_state["konfirmasi_hapus"] = pilih["id"]
         if st.session_state.get("konfirmasi_hapus") == pilih["id"]:
             st.warning("Hapus dataset ini? Riwayat run yang memakainya tetap ada.")
-            y, n, _ = st.columns([1, 1, 4])
+            y, n, _ = st.columns([1.1, 1, 3.5])
             if y.button("Ya, hapus"):
                 be = get_backend()
                 be.delete_file(pilih["storage_path"])

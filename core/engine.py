@@ -35,7 +35,29 @@ def default_settings():
 
 DEFAULTS = default_settings()
 METODE_LIST = list(DEFAULTS["METODE"].keys())
-METODE_BUTUH_INDIKATOR = ["ARIMAX", "VAR", "BVAR", "Ridge", "Elastic Net", "Faktor (PCA)", "Random Forest", "Gradient Boosting"]
+# v5: Ridge, Random Forest, dan Gradient Boosting tetap bisa jalan memakai lag target saja
+METODE_BUTUH_INDIKATOR = ["ARIMAX", "VAR", "BVAR", "Elastic Net", "Faktor (PCA)"]
+
+# Nama pengaturan lama (run sebelum v5) -> nama baru, supaya "Jalankan ulang" dari riwayat lama tetap jalan
+_NAMA_LAMA = {"PAKAI_LEBARAN": "PAKAI_IDUL_FITRI", "PAKAI_IDULADHA": "PAKAI_IDUL_ADHA",
+              "IDULADHA_HARI_SEBELUM": "IDUL_ADHA_HARI_SEBELUM", "IDULADHA_HARI_SESUDAH": "IDUL_ADHA_HARI_SESUDAH"}
+
+
+def sesuaikan_pengaturan(settings):
+    """Ubah pengaturan versi lama ke v5. Periode pandemi & rebound lama menjadi PERIODE_KRISIS manual."""
+    s = {_NAMA_LAMA.get(k, k): v for k, v in (settings or {}).items()}
+    if "PERIODE_PANDEMI" in s and "DETEKSI_KRISIS" not in s:
+        rg = [tuple(s["PERIODE_PANDEMI"])]
+        if s.get("PAKAI_REBOUND", True) and s.get("PERIODE_REBOUND"):
+            rg.append(tuple(s["PERIODE_REBOUND"]))
+        s["DETEKSI_KRISIS"], s["PERIODE_KRISIS"] = "manual", rg
+    for k in ("PERIODE_PANDEMI", "PERIODE_REBOUND", "PAKAI_REBOUND"):
+        s.pop(k, None)
+    if "PERIODE_KRISIS" in s:
+        s["PERIODE_KRISIS"] = [tuple(x) for x in s["PERIODE_KRISIS"]]
+    if "JENDELA_KRISIS" in s:
+        s["JENDELA_KRISIS"] = tuple(s["JENDELA_KRISIS"])
+    return {k: v for k, v in s.items() if k in DEFAULTS}
 METODE_LEVEL = ["SARIMA Musiman", "ETS Musiman"]
 
 
@@ -44,9 +66,13 @@ class ProgressWriter(io.StringIO):
 
     def __init__(self, cb=None, total=12):
         super().__init__()
-        self.cb, self.total, self.done = cb, total, 0
+        self.cb, self.done = cb, 0
+        self.total = total if isinstance(total, int) and total > 0 else 12
 
     def write(self, s):
+        m = re.search(r"Backtest (\d+) titik asal", s)
+        if m:                                   # jumlah backtest sebenarnya (bisa "otomatis" di pengaturan)
+            self.total = max(1, int(m.group(1)))
         if self.cb and "selesai: data s.d." in s:
             self.done += 1
             self.cb(min(self.done / self.total, 1.0), f"Backtest {self.done}/{self.total} selesai")
@@ -61,7 +87,7 @@ def run_projection(excel_bytes, sheet_name, settings, progress=None):
     data_path.write_bytes(excel_bytes)
     out = work / "output"
     ns = dict(DEFAULTS)
-    ns.update(settings)
+    ns.update(sesuaikan_pengaturan(settings))
     ns.update({"FILE_DATA": str(data_path), "SHEET_DATA": sheet_name, "FOLDER_OUTPUT": str(out),
                "NAMA_FILE_EXCEL": "hasil_proyeksi.xlsx", "__name__": "proyeksi_run"})
     log = ProgressWriter(progress, ns.get("JUMLAH_UJI_BACKTEST", 12))
@@ -135,7 +161,17 @@ def build_summary(ns):
         "label_target": str(ns["LABEL"].get(ns["TARGET"], ns["TARGET"])),
         "data_awal": str(ns["df_raw"].index[0]), "data_akhir": str(ns["df_raw"].index[-1]),
         "proyeksi_sampai": str(fc[-1]), "indikator": list(ns["EXOG_ALL"]),
-        "metode_aktif": list(ns["aktif"]), "dilewati": list(ns["dilewati"]),
+        "metode_aktif": list(ns["aktif"]), "dilewati": list(ns.get("alasan_lewat", {}) or ns["dilewati"]),
         "jumlah_titik_uji": int(urow["Jumlah titik uji"]), "urutan": order,
         "bobot_ensemble": {k: _f(v) for k, v in ns["W"].items()} if len(ns["W"]) else {},
+        "alasan_dilewati": {k: str(v) for k, v in ns.get("alasan_lewat", {}).items()},
+        "krisis": [str(p) for p in ns.get("KRISIS", [])],
+        "krisis_ringkas": ns["ringkas_periode"](ns.get("KRISIS", [])) if ns.get("KRISIS") else "tidak ada",
+        "info_krisis": str(ns.get("INFO_KRISIS", "")),
+        "sumber_yoy": str(ns.get("SUMBER_YOY", "")),
+        "catatan_otomatis": [str(x) for x in ns.get("CATATAN_AUTO", [])],
+        "peringatan": [str(x) for x in ns.get("PERINGATAN_DATA", [])],
+        "ensemble_disaring": [str(x) for x in ns.get("DISARING", [])],
+        "var_variabel": list(ns.get("VAR_VARS", [])),
+        "jumlah_backtest": int(ns.get("JUMLAH_UJI_BACKTEST", 0)),
     }

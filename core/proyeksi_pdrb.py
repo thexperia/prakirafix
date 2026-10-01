@@ -1,6 +1,6 @@
 """
-PROYEKSI PDRB DENGAN BANYAK METODE (mode yoy dan mode level)
-============================================================
+PROYEKSI PDRB DENGAN BANYAK METODE (mode yoy dan mode level) - v5
+=================================================================
 Cara pakai  :
   1. pip install -r requirements.txt
   2. Ubah bagian "PENGATURAN" di bawah ini sesuai kebutuhan (tidak perlu menyentuh bagian lain)
@@ -13,11 +13,15 @@ Format file Excel yang dibaca:
   Kolom A : tahun (cukup diisi di baris Q1, sisanya boleh kosong)
   Kolom B : triwulan (Q1, Q2, Q3, Q4)
 
-Dua mode:
-  - Mode yoy   : bila file hanya berisi pertumbuhan (contoh: data Babel)
-  - Mode level : bila file juga berisi level PDRB ADHK (kolom TARGET_LEVEL, contoh: data DIY).
-                 Pola musiman (Q4 > Q3, efek Lebaran) ikut dimodelkan, dan hasil keluar
+Dua mode (dipilih otomatis):
+  - Mode yoy   : bila file hanya berisi pertumbuhan yoy target.
+  - Mode level : bila file juga berisi level PDRB ADHK (kolom TARGET_LEVEL). Yoy target dihitung
+                 dari level, pola musiman (Q4 > Q3, efek Lebaran) ikut dimodelkan, dan hasil keluar
                  dalam level, qtq, dan yoy.
+
+Pengaturan bertanda "otomatis" menyesuaikan diri dengan panjang data (jumlah backtest, data mulai,
+lag VAR/BVAR, order ARIMA, jumlah indikator, dummy pandemi, dll), sehingga file data dengan rentang
+berbeda bisa langsung dipakai tanpa mengubah pengaturan.
 """
 
 # #############################################################################
@@ -30,19 +34,21 @@ Dua mode:
 FILE_DATA    = "Indikator_Makroekonomi_DIY.xlsx"
 SHEET_DATA   = "Indikator DIY (growth)"
 TARGET       = "GPDRB"          # kode kolom pertumbuhan yoy yang mau diproyeksi
-TARGET_LEVEL = "PDRB_ADHK"      # kode kolom level PDRB ADHK. Isi None (atau biarkan, bila kolomnya tidak ada)
-                                # untuk mode yoy saja. Contoh Babel: FILE_DATA = "Indikator_Makroekonomi_Bangka_Belitung.xlsx",
-                                # SHEET_DATA = "Indikator Babel (growth)" (otomatis mode yoy karena tidak ada kolom level)
+TARGET_LEVEL = "PDRB_ADHK"      # kode kolom level PDRB ADHK. Bila kolom ini ada di file: MODE LEVEL, yoy target
+                                # dihitung dari level (kolom TARGET boleh tidak ada; bila ada, dipakai sebagai pembanding).
+                                # Bila kolom ini tidak ada di file (atau diisi None): otomatis MODE YOY.
 
 # ---- 2. Periode (format "TAHUNQx", contoh "2027Q4") ----------------------------
-DATA_MULAI      = "2016Q1"      # data paling awal yang dipakai. Contoh "2018Q1" untuk abaikan data lama
+DATA_MULAI      = "otomatis"    # "otomatis" = mulai dari data target pertama yang tersedia.
+                                # Isi misalnya "2018Q1" untuk mengabaikan data lama
 DATA_SAMPAI     = None          # None = pakai data terakhir yang tersedia.
                                 # Isi misalnya "2025Q2" untuk uji coba: proyeksi dibuat seolah-olah
                                 # data berhenti di 2025Q2, lalu dibandingkan dengan data aktual sesudahnya
 PROYEKSI_SAMPAI = "2027Q4"      # proyeksi dibuat sampai periode ini
 
 # ---- 3. Indikator pendukung ------------------------------------------------------
-INDIKATOR_DIPAKAI = "semua"     # "semua" atau daftar kode, contoh: ["GPDB", "G_LISTRIK", "DPK"]
+INDIKATOR_DIPAKAI = "semua"     # "semua" atau daftar kode, contoh: ["GPDB", "KODE_LAIN"]
+                                # Indikator yang datanya kosong lebih dari 25% pada periode dipakai otomatis dikeluarkan.
 
 # ---- 4. Metode (True = dipakai, False = tidak) -------------------------------------
 METODE = {
@@ -60,16 +66,20 @@ METODE = {
     "Random Forest":     True,   # machine learning
     "Gradient Boosting": True,   # machine learning
     "SARIMA Musiman":    True,   # MODE LEVEL: SARIMA pada log PDRB ADHK, pola musiman + kalender Lebaran
-    "ETS Musiman":       False,  # MODE LEVEL: Holt-Winters pada log PDRB ADHK. Default mati: pada data DIY
-                                 # pola musiman berubah setelah pandemi sehingga hasil backtest-nya paling buruk
+    "ETS Musiman":       False,  # MODE LEVEL: Holt-Winters pada log PDRB ADHK. Default mati: bila pola musiman
+                                 # berubah setelah pandemi, hasil backtest-nya cenderung paling buruk
 }
 PAKAI_ENSEMBLE = True           # gabungan metode non-benchmark
 ENSEMBLE_CARA  = "inverse-rmse" # "inverse-rmse" = semua metode, bobot sesuai akurasi (default)
                                 # "top"          = hanya ENSEMBLE_TOP metode terbaik, bobot sesuai akurasi
                                 # "median"       = nilai tengah semua metode (tahan terhadap metode yang meleset jauh)
 ENSEMBLE_TOP   = 3
+ENSEMBLE_SARING     = True      # True = metode yang RMSE backtest-nya lebih dari ENSEMBLE_BATAS_RMSE x RMSE
+ENSEMBLE_BATAS_RMSE = 1.5       # tebakan naive (random walk) tidak diikutkan Ensemble (dicatat di Penjelasan_Metode)
 
 # ---- 5. Pengaturan metode (boleh dibiarkan default) ---------------------------------
+# Catatan: order ARIMA, lag VAR/BVAR, jumlah indikator ARIMAX, dan jumlah faktor PCA otomatis
+# diperkecil bila data latih pendek, supaya model tidak terlalu banyak parameter.
 ETS_TREN               = "damped"   # "damped" (tren melemah), "linear" (tren lurus), "tanpa" (datar)
 ARIMAX_JUMLAH_INDIKATOR = 3         # ARIMAX memakai maksimal N indikator dengan korelasi tertinggi
 ARIMAX_KORELASI_MIN    = 0.20       # indikator dengan |korelasi| di bawah ini tidak dipakai ARIMAX
@@ -79,10 +89,15 @@ ARIMAX_PROYEKSI_INDIKATOR = "ar1"   # cara indikator diproyeksi ke depan sebelum
                                     # "ar1"   = AR(1) + dummy pandemi (kembali ke rata-rata normal, bukan rata-rata
                                     #           yang tertarik ke bawah oleh 2020)
                                     # "rata2" = ditahan di rata-rata 4 triwulan terakhir
-VAR_INDIKATOR          = ["GPDB", "G_LISTRIK"]   # target otomatis ikut dalam VAR & BVAR
-BVAR_LAG               = 2          # jumlah lag BVAR
+VAR_INDIKATOR          = "otomatis" # indikator VAR & BVAR (target selalu ikut):
+                                    # "otomatis" = dipilih dari korelasi tanpa periode pandemi & rebound
+                                    # atau tentukan sendiri, contoh: ["GPDB"] atau ["GPDB", "KODE_LAIN"]
+VAR_JUMLAH_OTOMATIS    = 1          # "otomatis": maksimal N indikator (VAR cepat boros parameter; 1 paling aman
+                                    # untuk data sekitar 40 triwulan, 2 bila data panjang)
+VAR_KORELASI_MIN       = 0.20       # "otomatis": indikator dengan |korelasi| di bawah ini tidak dipilih
+BVAR_LAG               = "otomatis" # jumlah lag BVAR: "otomatis" (2, atau 1 bila data pendek) atau angka
 BVAR_KETATAN           = 0.2        # makin kecil makin "hemat" (koefisien ditarik ke prior), umumnya 0.1 s.d. 0.5
-FAKTOR_JUMLAH          = 2          # jumlah faktor untuk metode Faktor (PCA)
+FAKTOR_JUMLAH          = 2          # jumlah faktor maksimum untuk metode Faktor (PCA)
 RATA2_JUMLAH_TRIWULAN  = 8
 
 # ---- 5b. Jarak yoy antarkuartal -------------------------------------------------------
@@ -93,29 +108,40 @@ BATAS_PERUBAHAN_YOY = "otomatis"    # "otomatis" = persentil historis perubahan 
                                     # None = tanpa batas
 KUANTIL_BATAS       = 90            # persentil untuk "otomatis" (90 = hanya 10% perubahan historis yang lebih besar)
 
-# ---- 6. Dummy pandemi -----------------------------------------------------------------
-PAKAI_DUMMY_PANDEMI = True
-PERIODE_PANDEMI     = ("2020Q1", "2020Q4")   # periode kontraksi
-PERIODE_REBOUND     = ("2021Q2", "2021Q4")   # periode rebound (efek basis rendah)
-PAKAI_REBOUND       = True
-# Periode boleh ditulis per triwulan ("2020Q1") atau per bulan ("2020-03"). Bila per bulan, triwulan yang
-# hanya sebagian masuk periode diberi bobot sesuai porsi bulannya (mis. Maret saja = 1/3).
+# ---- 6. Penanda krisis (pandemi) ---------------------------------------------------------
+# Setiap triwulan krisis diberi dummy sendiri (impuls). Model belajar dari periode normal saja, dan anjlok 2020
+# tidak tercampur dengan lonjakan basis rendah 2021 (keduanya berlawanan arah).
+PAKAI_DUMMY_PANDEMI = True        # otomatis tidak dipakai bila periode data tidak mencakup masa krisis
+DETEKSI_KRISIS      = "otomatis"  # "otomatis" = triwulan di JENDELA_KRISIS yang yoy-nya menyimpang jauh dari periode
+                                  #              normal ditandai sendiri (anjlok maupun lonjakan)
+                                  # "manual"   = pakai daftar PERIODE_KRISIS
+JENDELA_KRISIS      = ("2020Q1", "2022Q4")   # "otomatis": rentang pencarian
+AMBANG_KRISIS       = 2.0         # "otomatis": menyimpang lebih dari N x simpangan baku periode normal
+PERIODE_KRISIS      = [("2020Q1", "2020Q4"), ("2021Q2", "2022Q1")]   # "manual": daftar rentang triwulan krisis
+                                  # boleh juga per bulan, mis. ("2020-03", "2020-12"): bulan diubah ke triwulannya
 
 # ---- 7. Efek musiman: kalender Islam (Ramadan, Lebaran, Idul Adha) & HBKN/Nataru ----------
+# Ramadan, Lebaran, dan Idul Adha tanggalnya bergeser tiap tahun, sehingga perlu variabel kalender sendiri.
+# Nataru & HBKN Natal tanggalnya tetap dan selalu di Q4:
+#   - model level (SARIMA/ETS Musiman): efeknya sudah tertangkap komponen musiman Q4;
+#   - model yoy: efeknya saling meniadakan (Q4 tahun ini dibanding Q4 tahun lalu).
+# Bila ada informasi Nataru tahun tertentu lebih ramai/sepi dari biasanya, gunakan PENYESUAIAN (add-factor) Q4.
 PAKAI_EFEK_KALENDER   = True    # hitung porsi hari Ramadan/Lebaran/Idul Adha per triwulan. Dipakai di model level
-                                # (SARIMA Musiman). HBKN & Nataru selalu di Q4: ditangkap komponen musiman Q4.
+                                # (SARIMA Musiman). False = semua efek kalender di bawah dimatikan.
+PAKAI_RAMADAN         = True    # True/False: efek bulan puasa
+PAKAI_IDUL_FITRI      = True    # True/False: efek Lebaran (Idul Fitri), jendela LEBARAN_HARI_SEBELUM/SESUDAH
+PAKAI_IDUL_ADHA       = False   # True/False: efek Idul Adha, jendela IDUL_ADHA_HARI_SEBELUM/SESUDAH.
+                                # Default mati: pada uji coba memperbesar bias SARIMA Musiman
+                                # Contoh hanya Idul Fitri: PAKAI_RAMADAN = False, PAKAI_IDUL_FITRI = True, PAKAI_IDUL_ADHA = False
 KALENDER_DI_MODEL_YOY = False   # True = variabel kalender (bentuk selisih yoy) juga masuk ARIMA/ARIMAX/VAR/ML.
-                                # Default mati: pada data DIY & Babel backtest-nya memburuk. Coba nyalakan & bandingkan.
+                                # Default mati: pada uji coba backtest-nya memburuk. Coba nyalakan & bandingkan.
 EFEK_TRIWULAN_YOY     = False   # True = dummy Q1/Q2/Q3 (pembanding Q4) masuk model yoy, untuk menangkap
                                 # kecenderungan yoy triwulan tertentu (misal Q4 akibat HBKN/Nataru) lebih tinggi.
-PAKAI_RAMADAN        = True     # porsi hari puasa per triwulan
-PAKAI_LEBARAN        = True     # porsi hari sekitar Idul Fitri (Lebaran) per triwulan
-PAKAI_IDULADHA       = True     # porsi hari sekitar Idul Adha per triwulan
-IDULADHA_HARI_SEBELUM = 0       # jendela Idul Adha: H-0 ...
-IDULADHA_HARI_SESUDAH = 0       # ... s.d. H+0 (hari raya saja)
 RAMADAN_HARI         = 30       # lama puasa (hari) sebelum Idul Fitri
 LEBARAN_HARI_SEBELUM = 10       # puncak Lebaran: H-10 (mudik, belanja) ...
 LEBARAN_HARI_SESUDAH = 7        # ... s.d. H+7 (libur, arus balik, wisata)
+IDUL_ADHA_HARI_SEBELUM = 0      # jendela Idul Adha: H-0 ...
+IDUL_ADHA_HARI_SESUDAH = 0      # ... s.d. H+0 (hari raya saja). Contoh H-1 s.d. H+3 untuk libur panjang
 # Tanggal 1 Syawal & 10 Zulhijah versi pemerintah. 2026 ke atas: sesuaikan dengan SKB 3 Menteri bila berbeda.
 TANGGAL_IDUL_FITRI = {
     2010: "2010-09-10", 2011: "2011-08-31", 2012: "2012-08-19", 2013: "2013-08-08", 2014: "2014-07-28",
@@ -131,9 +157,12 @@ TANGGAL_IDUL_ADHA = {
 }
 
 # ---- 8. Evaluasi ------------------------------------------------------------------------
-JUMLAH_UJI_BACKTEST = 12        # berapa kali model diuji mundur (semakin banyak semakin kokoh, tapi lebih lama)
+JUMLAH_UJI_BACKTEST = "otomatis"  # berapa kali model diuji mundur. "otomatis" = menyesuaikan panjang data
+                                  # (maksimal 12). Data pendek tetap dijalankan, dengan peringatan. Atau isi angka
 SELANG_KEPERCAYAAN  = 90        # dalam persen: 80, 90, atau 95
-POLA_MUSIMAN_MULAI  = "2022Q1"  # MODE LEVEL: rentang qtq historis pembanding untuk cek pola musiman
+POLA_MUSIMAN_MULAI  = "otomatis"  # MODE LEVEL: awal rentang qtq historis pembanding untuk cek pola musiman.
+                                  # "otomatis" = setelah masa pandemi & rebound (bila tersisa minimal 2 tahun),
+                                  # selain itu 3 tahun terakhir. Atau isi misalnya "2022Q1"
 
 # ---- 9. Penyesuaian judgment / add-factor (poin persen yoy) --------------------------------
 # Ditambahkan ke proyeksi yoy SEMUA metode pada periode yang disebut. Level & qtq ikut dihitung ulang.
@@ -146,13 +175,14 @@ PENYESUAIAN = {
 # ---- 10. Pembersihan data ----------------------------------------------------------------
 BERSIHKAN_OUTLIER = True        # pangkas nilai ekstrem pada indikator pendukung (target tidak diubah)
 BATAS_OUTLIER     = 4.0         # makin kecil makin ketat (umumnya 3 s.d. 5)
-OUTLIER_MANUAL    = None        # dict {kode indikator: ["2021Q2", ...]} = hanya periode ini yang ditangani (menggantikan BERSIHKAN_OUTLIER)
+OUTLIER_MANUAL    = None        # dict {kode indikator: ["2021Q2", ...]} = hanya periode ini yang ditangani
+                                # (menggantikan BERSIHKAN_OUTLIER). Batas wajar dihitung dari periode normal.
 OUTLIER_CARA      = "pangkas"   # "pangkas" = dipotong ke batas wajar | "hapus" = dikosongkan lalu diisi interpolasi
 
-# ---- 11b. Parameter per metode (advanced) ----------------------------------------------------
-ARIMA_MAX_PQ      = 2           # order AR dan MA maksimum yang dicoba ARIMA
+# ---- 10b. Parameter per metode (advanced) ----------------------------------------------------
+ARIMA_MAX_PQ      = "otomatis"  # order AR & MA maksimum ARIMA: "otomatis" (2, atau 1 bila data < 24 triwulan) atau angka
 ARIMAX_MAX_PQ     = 1           # order maksimum ARIMAX
-VAR_MAXLAG        = 4           # lag maksimum yang dicoba VAR
+VAR_MAXLAG        = "otomatis"  # lag maksimum VAR: "otomatis" (maks 2, lebih kecil bila data pendek) atau angka
 RF_POHON          = 400         # Random Forest: jumlah pohon
 RF_KEDALAMAN      = 4           # Random Forest: kedalaman maksimum pohon
 RF_MIN_DAUN       = 2           # Random Forest: minimal observasi per daun
@@ -161,7 +191,7 @@ GB_LEARNING_RATE  = 0.05        # Gradient Boosting: laju belajar
 GB_KEDALAMAN      = 2           # Gradient Boosting: kedalaman pohon
 
 # ---- 11. Grafik & output ------------------------------------------------------------------
-GRAFIK_MULAI           = "2021Q1"   # awal sumbu waktu pada grafik proyeksi
+GRAFIK_MULAI           = "otomatis" # awal sumbu waktu grafik proyeksi: "otomatis" = 5 tahun terakhir, atau "2021Q1"
 TAMPILKAN_BENCHMARK    = True       # tampilkan Naive & Rata-rata di grafik proyeksi
 FOLDER_OUTPUT          = "output"
 NAMA_FILE_EXCEL        = "hasil_proyeksi.xlsx"
@@ -233,11 +263,33 @@ def load_data(path, sheet):
 
 
 df_full, LABEL = load_data(FILE_DATA, SHEET_DATA)
+CATATAN_AUTO = []   # daftar penyesuaian otomatis, ditampilkan di ringkasan & sheet Pengaturan
+
+# --- mode level: yoy target dihitung dari level -----------------------------------
+MODE_LEVEL = bool(TARGET_LEVEL) and TARGET_LEVEL in df_full.columns
+SUMBER_YOY = f"kolom {TARGET}"
+if MODE_LEVEL:
+    _lv = df_full[TARGET_LEVEL]
+    _yoy_lv = (_lv / _lv.shift(4) - 1) * 100
+    if TARGET in df_full.columns:
+        _beda = (_yoy_lv - df_full[TARGET]).abs().dropna()
+        # Cadangan: triwulan awal yang level 4 triwulan sebelumnya tidak ada memakai kolom TARGET
+        _awal_lv = _yoy_lv.first_valid_index()
+        _cad = df_full[TARGET][(df_full.index < _awal_lv) & df_full[TARGET].notna()] if _awal_lv is not None else df_full[TARGET].iloc[:0]
+        SUMBER_YOY = f"dihitung dari {TARGET_LEVEL}" + (
+            f" (selisih rata-rata dengan kolom {TARGET}: {_beda.mean():.2f} pp)" if len(_beda) else "") + (
+            f"; {len(_cad)} triwulan awal ({_cad.index[0]} s.d. {_cad.index[-1]}) memakai kolom {TARGET} "
+            f"karena level 4 triwulan sebelumnya tidak ada" if len(_cad) else "")
+        _yoy_lv = _yoy_lv.combine_first(_cad)
+    else:
+        SUMBER_YOY = f"dihitung dari {TARGET_LEVEL} (kolom {TARGET} tidak ada di file)"
+        LABEL[TARGET] = f"Pertumbuhan yoy {LABEL.get(TARGET_LEVEL, TARGET_LEVEL)}"
+    df_full[TARGET] = _yoy_lv
 
 # --- cek pengaturan ------------------------------------------------------------
 if TARGET not in df_full.columns:
-    stop(f'TARGET "{TARGET}" tidak ada. Kode yang tersedia: {list(df_full.columns)}')
-MODE_LEVEL = bool(TARGET_LEVEL) and TARGET_LEVEL in df_full.columns
+    stop(f'TARGET "{TARGET}" tidak ada. Kode yang tersedia: {list(df_full.columns)}. '
+         f'Bila file berisi level PDRB, isi TARGET_LEVEL dengan kode kolom level.')
 NON_INDIKATOR = [TARGET] + ([TARGET_LEVEL] if TARGET_LEVEL in df_full.columns else [])
 if INDIKATOR_DIPAKAI == "semua":
     EXOG_ALL = [c for c in df_full.columns if c not in NON_INDIKATOR]
@@ -246,10 +298,13 @@ else:
     if salah:
         stop(f"Indikator {salah} tidak ada. Kode yang tersedia: {list(df_full.columns)}")
     EXOG_ALL = [c for c in INDIKATOR_DIPAKAI if c not in NON_INDIKATOR]
-if not EXOG_ALL and (METODE.get("ARIMAX") or METODE.get("VAR")):
-    stop("ARIMAX/VAR butuh minimal 1 indikator pendukung. Tambah INDIKATOR_DIPAKAI atau matikan metodenya.")
 
-p_mulai = to_period(DATA_MULAI, "DATA_MULAI")
+if df_full[TARGET].notna().sum() == 0:
+    stop(f"Kolom {TARGET} tidak berisi angka.")
+if DATA_MULAI is None or str(DATA_MULAI).lower() == "otomatis":
+    p_mulai = df_full[TARGET].first_valid_index()
+else:
+    p_mulai = max(to_period(DATA_MULAI, "DATA_MULAI"), df_full[TARGET].first_valid_index())
 p_last_avail = df_full[TARGET].last_valid_index()
 p_sampai = to_period(DATA_SAMPAI, "DATA_SAMPAI") if DATA_SAMPAI else p_last_avail
 p_proj = to_period(PROYEKSI_SAMPAI, "PROYEKSI_SAMPAI")
@@ -258,9 +313,6 @@ if p_sampai > p_last_avail:
 if p_proj <= p_sampai:
     stop(f"PROYEKSI_SAMPAI ({p_proj}) harus setelah data terakhir ({p_sampai}).")
 
-VAR_VARS = [TARGET] + [v for v in VAR_INDIKATOR if v in EXOG_ALL]
-if (METODE.get("VAR") or METODE.get("BVAR")) and len(VAR_VARS) < 2:
-    stop(f"VAR_INDIKATOR {VAR_INDIKATOR} harus termasuk dalam INDIKATOR_DIPAKAI.")
 if SELANG_KEPERCAYAAN not in (80, 90, 95):
     stop("SELANG_KEPERCAYAAN sebaiknya 80, 90, atau 95.")
 if ETS_TREN not in ("damped", "linear", "tanpa"):
@@ -272,51 +324,96 @@ if ARIMAX_PROYEKSI_INDIKATOR not in ("ar1", "rata2"):
 if not (BATAS_PERUBAHAN_YOY is None or BATAS_PERUBAHAN_YOY == "otomatis"
         or isinstance(BATAS_PERUBAHAN_YOY, (int, float))):
     stop('BATAS_PERUBAHAN_YOY harus "otomatis", angka (misal 0.75), atau None.')
-if not EXOG_ALL and any(METODE.get(m) for m in ("BVAR", "Elastic Net", "Faktor (PCA)")):
-    stop("BVAR/Elastic Net/Faktor (PCA) butuh indikator pendukung. Tambah INDIKATOR_DIPAKAI atau matikan metodenya.")
+if not (VAR_INDIKATOR == "otomatis" or isinstance(VAR_INDIKATOR, (list, tuple))):
+    stop('VAR_INDIKATOR harus "otomatis" atau daftar kode, contoh: ["GPDB"].')
 
-df_raw = df_full.loc[(df_full.index >= p_mulai) & (df_full.index <= p_sampai), [TARGET] + EXOG_ALL]
+# --- indikator dengan data terlalu banyak kosong dikeluarkan otomatis -----------------
+_per = (df_full.index >= p_mulai) & (df_full.index <= p_sampai)
+_kosong = {c: df_full.loc[_per, c].isna().mean() for c in EXOG_ALL}
+_keluar = [c for c, f in _kosong.items() if f > 0.25]
+if _keluar:
+    EXOG_ALL = [c for c in EXOG_ALL if c not in _keluar]
+    CATATAN_AUTO.append("indikator dikeluarkan karena data kosong > 25%: "
+                        + ", ".join(f"{c} ({_kosong[c]:.0%})" for c in _keluar))
+
+df_raw = df_full.loc[_per, [TARGET] + EXOG_ALL]
 fc_periods = pd.period_range(p_sampai + 1, p_proj, freq="Q")
 H = len(fc_periods)
 CI = SELANG_KEPERCAYAAN / 100
 Z = stats.norm.ppf(0.5 + CI / 2)
-min_train = 16
-if len(df_raw) - JUMLAH_UJI_BACKTEST - 1 < min_train:
-    stop(f"Data terlalu pendek ({len(df_raw)} obs) untuk {JUMLAH_UJI_BACKTEST} uji backtest. "
-         f"Kurangi JUMLAH_UJI_BACKTEST atau mundurkan DATA_MULAI.")
+
+# --- jumlah backtest menyesuaikan panjang data -------------------------------------------
+n_obs = len(df_raw)
+PERINGATAN_DATA = []
+if n_obs < 3:
+    stop(f"Data target hanya {n_obs} triwulan ({p_mulai} s.d. {p_sampai}); tidak ada yang bisa diproyeksi.")
+if str(JUMLAH_UJI_BACKTEST).lower() == "otomatis":
+    # data latih minimum sebelum uji pertama: 16 bila data cukup panjang, selain itu sekitar 55% data
+    min_train = 16 if n_obs >= 29 else max(2, int(np.ceil(n_obs * 0.55)))
+    JUMLAH_UJI_BACKTEST = int(max(1, min(12, n_obs - min_train - 1)))
+    CATATAN_AUTO.append(f"jumlah backtest {JUMLAH_UJI_BACKTEST} (dari {n_obs} triwulan data, data latih minimum {min_train})")
+else:
+    JUMLAH_UJI_BACKTEST = int(JUMLAH_UJI_BACKTEST)
+    if n_obs - JUMLAH_UJI_BACKTEST - 1 < 4:
+        _baru = int(max(1, n_obs - 5))
+        PERINGATAN_DATA.append(f"JUMLAH_UJI_BACKTEST {JUMLAH_UJI_BACKTEST} terlalu banyak untuk {n_obs} triwulan data; "
+                               f"diturunkan menjadi {_baru}")
+        JUMLAH_UJI_BACKTEST = _baru
+    min_train = n_obs - JUMLAH_UJI_BACKTEST - 1
+if min_train >= 12 and JUMLAH_UJI_BACKTEST < 8:
+    PERINGATAN_DATA.append(f"backtest hanya {JUMLAH_UJI_BACKTEST} kali (diatur manual / mode cepat): peringkat dan bobot Ensemble "
+                           "kurang kokoh. Untuk hasil final gunakan jumlah backtest otomatis.")
+elif min_train < 12 or JUMLAH_UJI_BACKTEST < 8:
+    PERINGATAN_DATA.append(
+        f"data pendek ({n_obs} triwulan): backtest {JUMLAH_UJI_BACKTEST} kali dengan data latih awal {min_train} triwulan. "
+        "Peringkat dan bobot Ensemble kurang kokoh, dan metode yang butuh banyak data bisa gagal (dilewati otomatis). "
+        "Rekomendasi: mundurkan DATA_MULAI atau tambah data bila ada, utamakan metode sederhana "
+        "(Naive, Rata-rata, ARIMA, ETS, Theta), dan gunakan hasil sebagai indikasi awal.")
+for w_ in PERINGATAN_DATA:
+    print(f"  PERINGATAN: {w_}")
+
+if str(DETEKSI_KRISIS).lower() not in ("otomatis", "manual"):
+    stop('DETEKSI_KRISIS harus "otomatis" atau "manual".')
 
 # --- mode level ------------------------------------------------------------------
 LVL = None
 if MODE_LEVEL:
     LVL = df_full[TARGET_LEVEL].loc[:p_sampai].dropna()
-    if LVL.index[-1] != p_sampai:
-        stop(f"Kolom {TARGET_LEVEL} berakhir di {LVL.index[-1]}, tidak sama dengan data target ({p_sampai}).")
-    cek = ((LVL / LVL.shift(4) - 1) * 100).reindex(df_raw.index).dropna()
-    beda = (cek - df_raw[TARGET].reindex(cek.index)).abs()
-    if len(beda) and beda.mean() > 0.10:
-        print(f"  PERINGATAN: yoy dari {TARGET_LEVEL} berbeda rata-rata {beda.mean():.2f} pp dari {TARGET}. "
-              "Pastikan kolom level dan kolom yoy berasal dari seri yang sama.")
 
+# --- metode aktif; yang tidak bisa jalan dilewati otomatis beserta alasannya ----------------
+BUTUH_INDIKATOR = ["ARIMAX", "VAR", "BVAR", "Elastic Net", "Faktor (PCA)"]
 aktif = [m for m, on in METODE.items() if on]
-dilewati = [m for m in aktif if m in METODE_LEVEL and not MODE_LEVEL]
+alasan_lewat = {}
+for m in aktif:
+    if m in METODE_LEVEL and not MODE_LEVEL:
+        alasan_lewat[m] = f"butuh kolom level {TARGET_LEVEL or '(TARGET_LEVEL)'} di file data"
+    elif m in METODE_LEVEL and len(LVL.loc[p_mulai - 4:]) < 20:
+        alasan_lewat[m] = f"data level kurang dari 5 tahun ({len(LVL.loc[p_mulai - 4:])} triwulan)"
+    elif m in BUTUH_INDIKATOR and not EXOG_ALL:
+        alasan_lewat[m] = "butuh minimal 1 indikator pendukung"
+dilewati = list(alasan_lewat)
 aktif = [m for m in aktif if m not in dilewati]
 if not aktif:
-    stop("Aktifkan minimal satu metode di bagian METODE.")
+    stop("Tidak ada metode yang bisa dijalankan. Aktifkan minimal satu metode di bagian METODE.")
 os.makedirs(FOLDER_OUTPUT, exist_ok=True)
 
 print("=" * 72)
 print(f" Target        : {TARGET} ({LABEL[TARGET]})")
 print(f" Mode          : {'LEVEL (pola musiman dari ' + TARGET_LEVEL + ')' if MODE_LEVEL else 'YOY (tidak ada kolom level)'}")
+print(f" Sumber yoy    : {SUMBER_YOY}")
 print(f" Data dipakai  : {df_raw.index[0]} s.d. {df_raw.index[-1]} ({len(df_raw)} obs)")
 print(f" Proyeksi      : {fc_periods[0]} s.d. {fc_periods[-1]} ({H} triwulan)")
 print(f" Indikator     : {', '.join(EXOG_ALL) if EXOG_ALL else '-'}")
 print(f" Metode        : {', '.join(aktif)}{' + Ensemble' if PAKAI_ENSEMBLE else ''}")
-if dilewati:
-    print(f" Dilewati      : {', '.join(dilewati)} (butuh kolom level {TARGET_LEVEL})")
+for m_, a_ in alasan_lewat.items():
+    print(f" Dilewati      : {m_} ({a_})")
 print(f" Dummy pandemi : {'Ya' if PAKAI_DUMMY_PANDEMI else 'Tidak'} | Backtest: {JUMLAH_UJI_BACKTEST} uji | CI {SELANG_KEPERCAYAAN}%")
-print(f" Efek musiman  : kalender {'di model level' if PAKAI_EFEK_KALENDER else 'tidak'}"
+_kal_aktif = [n_ for n_, on_ in (("Ramadan", PAKAI_RAMADAN), ("Idul Fitri", PAKAI_IDUL_FITRI), ("Idul Adha", PAKAI_IDUL_ADHA)) if on_]
+print(f" Efek musiman  : kalender {'(' + ', '.join(_kal_aktif) + ') di model level' if PAKAI_EFEK_KALENDER and _kal_aktif else 'tidak'}"
       f"{' + model yoy' if PAKAI_EFEK_KALENDER and KALENDER_DI_MODEL_YOY else ''}"
       f" | dummy triwulan yoy: {'Ya' if EFEK_TRIWULAN_YOY else 'Tidak'}")
+for c_ in CATATAN_AUTO:
+    print(f" Otomatis      : {c_}")
 print("=" * 72)
 
 # =============================================================================
@@ -354,26 +451,99 @@ if df_raw[TARGET].isna().any():
 
 df = df_raw.copy()
 df[TARGET] = df[TARGET].interpolate(limit_direction="both")
+
+
+# ---- Penanda krisis --------------------------------------------------------------------
+def _rentang(a, b, nama):
+    return list(pd.period_range(to_period(a, nama), to_period(b, nama), freq="Q"))
+
+
+def ringkas_periode(ps):
+    """[2020Q1, 2020Q2, 2021Q2] -> '2020Q1 s.d. 2020Q2, 2021Q2'"""
+    ps = sorted(ps)
+    if not ps:
+        return "-"
+    out, a, b = [], ps[0], ps[0]
+    for p in ps[1:]:
+        if p == b + 1:
+            b = p
+        else:
+            out.append(str(a) if a == b else f"{a} s.d. {b}"); a = b = p
+    out.append(str(a) if a == b else f"{a} s.d. {b}")
+    return ", ".join(out)
+
+
+_manual = [p for a, b in PERIODE_KRISIS for p in _rentang(a, b, "PERIODE_KRISIS")]
+if str(DETEKSI_KRISIS).lower() == "manual":
+    KRISIS, INFO_KRISIS = sorted(set(_manual)), "manual (PERIODE_KRISIS)"
+else:
+    _w = set(_rentang(JENDELA_KRISIS[0], JENDELA_KRISIS[1], "JENDELA_KRISIS"))
+    _yk = df[TARGET]
+    _norm = _yk[[p not in _w for p in _yk.index]].dropna()
+    if len(_norm) >= 8:
+        _med, _sd = _norm.median(), max(_norm.std(), 0.1)
+        _cand = _yk[[p in _w for p in _yk.index]]
+        KRISIS = sorted(_cand[(_cand - _med).abs() > AMBANG_KRISIS * _sd].index)
+        INFO_KRISIS = (f"otomatis: yoy di {JENDELA_KRISIS[0]} s.d. {JENDELA_KRISIS[1]} yang menyimpang > "
+                       f"{AMBANG_KRISIS:g} x {_sd:.2f} pp dari median normal {_med:.2f}%")
+    else:
+        KRISIS = sorted(set(_manual))
+        INFO_KRISIS = "PERIODE_KRISIS (data periode normal kurang dari 8 triwulan, deteksi otomatis tidak bisa)"
+KRISIS = [p for p in KRISIS if df.index[0] <= p <= df.index[-1]]
+SPAN_KRISIS = list(pd.period_range(KRISIS[0], KRISIS[-1], freq="Q")) if KRISIS else []
+if PAKAI_DUMMY_PANDEMI and not KRISIS:
+    PAKAI_DUMMY_PANDEMI = False
+    CATATAN_AUTO.append("dummy krisis tidak dipakai (tidak ada triwulan krisis di periode data)")
+if KRISIS:
+    CATATAN_AUTO.append(f"triwulan krisis: {ringkas_periode(KRISIS)} ({INFO_KRISIS})")
+print(f"\nPENANDA KRISIS : {ringkas_periode(KRISIS)}" + ("" if PAKAI_DUMMY_PANDEMI else " (dummy tidak dipakai)"))
+print(f"  {INFO_KRISIS}")
+
+
+def normal(p):
+    """True bila periode p di luar rentang krisis (dari triwulan krisis pertama s.d. terakhir)."""
+    return p not in SPAN_KRISIS
+
+
+def isi_krisis(y):
+    """Triwulan krisis diganti interpolasi linear. Dipakai metode tanpa regresor (ETS, Theta)."""
+    if not PAKAI_DUMMY_PANDEMI or not KRISIS:
+        return y
+    m = y.index.isin(KRISIS)
+    if not m.any() or m.all():
+        return y
+    s = y.copy()
+    s[m] = np.nan
+    return s.interpolate(limit_direction="both")
+
+
+# ---- Pembersihan outlier indikator: batas dari periode normal, triwulan krisis tidak dipangkas ----
 winsor_log = []
+_ok_norm = np.array([normal(p) for p in df.index])
 for c in EXOG_ALL:
-    s_ = df[c]
-    med = s_.median(); mad = 1.4826 * (s_ - med).abs().median()
-    lo, hi = med - BATAS_OUTLIER * mad, med + BATAS_OUTLIER * mad
-    if OUTLIER_MANUAL is not None:
-        per_ = [to_period(x, "OUTLIER_MANUAL") for x in OUTLIER_MANUAL.get(c, [])]
-        per_ = [x for x in per_ if x in s_.index]
-        for x in per_:
-            lama = s_[x]
+    s = df[c]
+    nm = s[_ok_norm].dropna()
+    if len(nm) < 8:
+        nm = s.dropna()
+    med = nm.median()
+    skala = max(1.4826 * (nm - med).abs().median(), nm.std())   # skala minimum = simpangan baku normal
+    lo, hi = med - BATAS_OUTLIER * skala, med + BATAS_OUTLIER * skala
+    if OUTLIER_MANUAL is not None:                               # pilihan manual dari aplikasi web
+        for x in [to_period(v, "OUTLIER_MANUAL") for v in (OUTLIER_MANUAL.get(c) or [])]:
+            if x not in s.index or pd.isna(s[x]):
+                continue
+            lama = float(s[x])
             baru = np.nan if OUTLIER_CARA == "hapus" else float(np.clip(lama, lo, hi))
             df.loc[x, c] = baru
             winsor_log.append({"Kode": c, "Periode": str(x), "Nilai asli": lama,
                                "Nilai baru": "diisi interpolasi" if OUTLIER_CARA == "hapus" else baru,
                                "Cara": OUTLIER_CARA, "Batas bawah": lo, "Batas atas": hi})
     elif BERSIHKAN_OUTLIER:
-        n_clip = int(((s_ < lo) | (s_ > hi)).sum())
-        if n_clip:
-            winsor_log.append({"Kode": c, "Batas bawah": lo, "Batas atas": hi, "Nilai dipangkas": n_clip})
-        df[c] = s_.clip(lo, hi)
+        luar = ((s < lo) | (s > hi)) & _ok_norm
+        if luar.any():
+            winsor_log.append({"Kode": c, "Batas bawah": lo, "Batas atas": hi, "Nilai dipangkas": int(luar.sum()),
+                               "Periode": ", ".join(str(p) for p in s.index[luar])})
+            df.loc[luar, c] = s[luar].clip(lo, hi)
 df[EXOG_ALL] = df[EXOG_ALL].interpolate(limit_direction="both")
 
 # ---- Variabel kalender -----------------------------------------------------------
@@ -387,87 +557,106 @@ IDX_KAL = pd.period_range(min(ALL_IDX[0], (LVL.index[0] if MODE_LEVEL else ALL_I
 
 def buat_kalender(idx):
     tahun = range(idx[0].year - 1, idx[-1].year + 2)
-    kurang = [t for t in tahun if t not in TANGGAL_IDUL_FITRI or t not in TANGGAL_IDUL_ADHA]
+    fitri = PAKAI_RAMADAN or PAKAI_IDUL_FITRI
+    kurang = [t for t in tahun if (fitri and t not in TANGGAL_IDUL_FITRI) or (PAKAI_IDUL_ADHA and t not in TANGGAL_IDUL_ADHA)]
     if kurang:
         stop(f"Tanggal Idul Fitri/Idul Adha tahun {kurang} belum ada di TANGGAL_IDUL_FITRI / TANGGAL_IDUL_ADHA.")
     hari = pd.date_range(f"{tahun[0]}-01-01", f"{tahun[-1]}-12-31")
     ram = pd.Series(0.0, index=hari); leb = ram.copy(); adha = ram.copy()
     for t in tahun:
-        d = pd.Timestamp(TANGGAL_IDUL_FITRI[t])
-        ram[d - pd.Timedelta(days=RAMADAN_HARI): d - pd.Timedelta(days=1)] = 1
-        leb[d - pd.Timedelta(days=LEBARAN_HARI_SEBELUM): d + pd.Timedelta(days=LEBARAN_HARI_SESUDAH)] = 1
-        da = pd.Timestamp(TANGGAL_IDUL_ADHA[t])
-        adha[da - pd.Timedelta(days=IDULADHA_HARI_SEBELUM): da + pd.Timedelta(days=IDULADHA_HARI_SESUDAH)] = 1
+        if fitri:
+            d = pd.Timestamp(TANGGAL_IDUL_FITRI[t])
+            ram[d - pd.Timedelta(days=RAMADAN_HARI): d - pd.Timedelta(days=1)] = 1
+            leb[d - pd.Timedelta(days=LEBARAN_HARI_SEBELUM): d + pd.Timedelta(days=LEBARAN_HARI_SESUDAH)] = 1
+        if PAKAI_IDUL_ADHA:
+            da = pd.Timestamp(TANGGAL_IDUL_ADHA[t])
+            adha[da - pd.Timedelta(days=IDUL_ADHA_HARI_SEBELUM): da + pd.Timedelta(days=IDUL_ADHA_HARI_SESUDAH)] = 1
     q = hari.to_period("Q")
     kal = pd.DataFrame(index=ram.groupby(q).sum().index)
     if PAKAI_RAMADAN:
         kal["K_RAMADAN"] = ram.groupby(q).sum() / max(RAMADAN_HARI, 1)
-    if PAKAI_LEBARAN:
+    if PAKAI_IDUL_FITRI:
         kal["K_LEBARAN"] = leb.groupby(q).sum() / (LEBARAN_HARI_SEBELUM + LEBARAN_HARI_SESUDAH + 1)
-    if PAKAI_IDULADHA:
-        kal["K_IDULADHA"] = adha.groupby(q).sum() / (IDULADHA_HARI_SEBELUM + IDULADHA_HARI_SESUDAH + 1)
+    if PAKAI_IDUL_ADHA:
+        kal["K_IDULADHA"] = adha.groupby(q).sum() / (IDUL_ADHA_HARI_SEBELUM + IDUL_ADHA_HARI_SESUDAH + 1)
     return kal.reindex(pd.period_range(idx[0] - 4, idx[-1], freq="Q"))
 
 
-PAKAI_EFEK_KALENDER = PAKAI_EFEK_KALENDER and (PAKAI_RAMADAN or PAKAI_LEBARAN or PAKAI_IDULADHA)
+if PAKAI_EFEK_KALENDER and not (PAKAI_RAMADAN or PAKAI_IDUL_FITRI or PAKAI_IDUL_ADHA):
+    PAKAI_EFEK_KALENDER = False
+    print("  Catatan: Ramadan, Idul Fitri, dan Idul Adha semuanya False, efek kalender tidak dipakai.")
+
+
 KAL_LVL = buat_kalender(IDX_KAL) if PAKAI_EFEK_KALENDER else pd.DataFrame(index=IDX_KAL)
 KAL_YOY = (KAL_LVL - KAL_LVL.shift(4)).add_suffix("_yoy")
-
-def _ke_bulan(txt, akhir, nama):
-    """'2020Q1' -> Jan 2020 (awal) / Mar 2020 (akhir); '2020-03' -> Mar 2020."""
-    t = str(txt).strip().upper()
-    if "Q" in t:
-        q_ = to_period(t, nama)
-        return (q_.asfreq("M", "end") if akhir else q_.asfreq("M", "start"))
-    try:
-        return pd.Period(t, "M")
-    except Exception:
-        stop(f'{nama} = "{txt}" tidak dikenali. Pakai "2020Q1" atau "2020-03".')
-
-
-def bobot_periode(rng, idx, nama):
-    """Porsi bulan (0 s.d. 1) tiap triwulan yang masuk rentang rng = (awal, akhir)."""
-    a_, b_ = _ke_bulan(rng[0], False, nama), _ke_bulan(rng[1], True, nama)
-    out = []
-    for p in idx:
-        bulan = pd.period_range(p.asfreq("M", "start"), p.asfreq("M", "end"), freq="M")
-        out.append(sum(1 for m in bulan if a_ <= m <= b_) / 3)
-    return out
-
-
-_akhir_pand_bulan = _ke_bulan(PERIODE_PANDEMI[1], True, "PERIODE_PANDEMI")
-_PEMULIHAN = (str(_akhir_pand_bulan + 1), PERIODE_REBOUND[1])
 
 # Dummy (untuk model berbasis yoy): pandemi + kalender dalam bentuk yoy
 DUM = pd.DataFrame(index=ALL_IDX)
 if PAKAI_DUMMY_PANDEMI:
-    DUM["D_PANDEMI"] = bobot_periode(PERIODE_PANDEMI, ALL_IDX, "PERIODE_PANDEMI")
-    if PAKAI_REBOUND:
-        DUM["D_REBOUND"] = bobot_periode(PERIODE_REBOUND, ALL_IDX, "PERIODE_REBOUND")
+    for pk in KRISIS:                      # satu dummy impuls per triwulan krisis
+        DUM[f"D_K{pk}"] = [1.0 if p == pk else 0.0 for p in ALL_IDX]
 if PAKAI_EFEK_KALENDER and KALENDER_DI_MODEL_YOY:
     DUM = DUM.join(KAL_YOY.reindex(ALL_IDX))
 if EFEK_TRIWULAN_YOY:
     for q_ in (1, 2, 3):
         DUM[f"D_Q{q_}"] = [1.0 if p.quarter == q_ else 0.0 for p in ALL_IDX]
 
-# Dummy (untuk model berbasis level): level turun selama pandemi, pulih bertahap
+# Dummy (untuk model berbasis level): impuls di setiap triwulan dalam rentang krisis, karena level PDRB
+# tertekan sepanjang rentang itu (termasuk triwulan yang yoy-nya tampak normal akibat basis rendah)
 DUM_L = pd.DataFrame(index=IDX_KAL)
 if MODE_LEVEL and PAKAI_DUMMY_PANDEMI:
-    DUM_L["D_PANDEMI"] = bobot_periode(PERIODE_PANDEMI, IDX_KAL, "PERIODE_PANDEMI")
-    if PAKAI_REBOUND:
-        DUM_L["D_PEMULIHAN"] = bobot_periode(_PEMULIHAN, IDX_KAL, "PERIODE_REBOUND")
+    for pk in SPAN_KRISIS:
+        DUM_L[f"D_K{pk}"] = [1.0 if p == pk else 0.0 for p in IDX_KAL]
 if MODE_LEVEL and PAKAI_EFEK_KALENDER:
     DUM_L = DUM_L.join(KAL_LVL.reindex(IDX_KAL))
 
 
 # ---- Jarak yoy antarkuartal: pola historis periode normal -------------------------------
-_awal_krisis = _ke_bulan(PERIODE_PANDEMI[0], False, "PERIODE_PANDEMI").asfreq("Q")
-_akhir_krisis = _ke_bulan(PERIODE_REBOUND[1] if PAKAI_REBOUND else PERIODE_PANDEMI[1], True, "PERIODE_REBOUND").asfreq("Q")
+# Awal rentang pembanding pola musiman (mode level)
+if str(POLA_MUSIMAN_MULAI).lower() == "otomatis":
+    _c = (SPAN_KRISIS[-1] + 1) if SPAN_KRISIS else df_raw.index[0]
+    if MODE_LEVEL and LVL.index[0] < _c and p_sampai.ordinal - _c.ordinal + 1 >= 8:
+        POLA_MUSIMAN_MULAI = str(_c)
+    else:
+        POLA_MUSIMAN_MULAI = str(max(df_raw.index[0], p_sampai - 11))
 
 
-def normal(p):
-    """True bila periode p di luar masa pandemi s.d. rebound."""
-    return not (_awal_krisis <= p <= _akhir_krisis)
+def _korelasi_normal(y, X):
+    """|Korelasi| indikator dengan target, dihitung di luar masa pandemi & rebound (menghindari korelasi semu)."""
+    ok = [normal(p) for p in y.index]
+    if sum(ok) < 8:
+        ok = [True] * len(y)
+    return X[ok].corrwith(y[ok]).abs().dropna().sort_values(ascending=False)
+
+
+VAR_HILANG = []
+
+
+def pilih_var(y, X):
+    """Variabel VAR/BVAR: target + indikator otomatis (korelasi) atau daftar VAR_INDIKATOR."""
+    if VAR_INDIKATOR == "otomatis":
+        kor = _korelasi_normal(y, X)
+        sel = list(kor[kor >= VAR_KORELASI_MIN].index[:VAR_JUMLAH_OTOMATIS]) or list(kor.index[:1])
+    else:
+        sel = [v for v in VAR_INDIKATOR if v in X.columns]
+        if not sel:   # semua yang ditulis tidak tersedia: kembali ke pilihan otomatis
+            kor = _korelasi_normal(y, X)
+            sel = list(kor.index[:1])
+    return [TARGET] + sel
+
+
+if EXOG_ALL:
+    VAR_VARS = pilih_var(df[TARGET], df[EXOG_ALL])
+    if VAR_INDIKATOR != "otomatis":
+        VAR_HILANG = [v for v in VAR_INDIKATOR if v not in EXOG_ALL]
+        if VAR_HILANG:
+            CATATAN_AUTO.append(f"VAR_INDIKATOR {', '.join(VAR_HILANG)} tidak tersedia, tidak ikut VAR/BVAR"
+                                + ("" if len(VAR_VARS) > 1 and any(v in EXOG_ALL for v in VAR_INDIKATOR)
+                                   else f"; diganti pilihan otomatis {', '.join(VAR_VARS[1:])}"))
+            print(f"  CATATAN: {CATATAN_AUTO[-1]}")
+    print(f"  Variabel VAR/BVAR ({'otomatis' if VAR_INDIKATOR == 'otomatis' else 'ditentukan'}): {', '.join(VAR_VARS)}")
+else:
+    VAR_VARS = [TARGET]
 
 
 DY = df[TARGET].diff()
@@ -552,7 +741,9 @@ def yoy_dari_level(L_hist, periods, lvl):
 #    lo/hi None = selang dihitung dari error backtest
 # =============================================================================
 def m_naive(y, X, h):
-    sd = y.diff().dropna().std()
+    d = y.diff()
+    dn = d[[normal(p) and normal(p - 1) for p in d.index]].dropna()
+    sd = (dn if len(dn) >= 6 else d.dropna()).std()      # simpangan dari periode normal (bukan pandemi)
     mean = np.repeat(y.iloc[-1], h)
     se = sd * np.sqrt(np.arange(1, h + 1))
     return dict(mean=mean, lo=mean - Z * se, hi=mean + Z * se)
@@ -562,8 +753,7 @@ def m_mean(y, X, h):
     return dict(mean=np.repeat(y.iloc[-RATA2_JUMLAH_TRIWULAN:].mean(), h), lo=None, hi=None)
 
 
-def _best_arima(y, exog=None, max_pq=None):
-    max_pq = ARIMA_MAX_PQ if max_pq is None else max_pq
+def _best_arima(y, exog=None, max_pq=2):
     best = None
     for p in range(max_pq + 1):
         for q in range(max_pq + 1):
@@ -576,9 +766,13 @@ def _best_arima(y, exog=None, max_pq=None):
     return best
 
 
+def _auto(v):
+    return str(v).lower() == "otomatis"
+
+
 def m_arima(y, X, h):
     d_tr, d_fc = dummies(y.index, h)
-    res, order = _best_arima(y, exog=d_tr)
+    res, order = _best_arima(y, exog=d_tr, max_pq=(2 if len(y) >= 24 else 1) if _auto(ARIMA_MAX_PQ) else int(ARIMA_MAX_PQ))
     fc = res.get_forecast(h, exog=d_fc)
     ci = fc.conf_int(alpha=1 - CI)
     return dict(mean=fc.predicted_mean, lo=ci[:, 0], hi=ci[:, 1], res=res,
@@ -587,7 +781,8 @@ def m_arima(y, X, h):
 
 def m_ets(y, X, h):
     trend = None if ETS_TREN == "tanpa" else "add"
-    res = ExponentialSmoothing(y.values, trend=trend, damped_trend=(ETS_TREN == "damped")).fit(optimized=True)
+    yf = isi_krisis(y)                                    # triwulan krisis diisi interpolasi sebelum fitting
+    res = ExponentialSmoothing(yf.values, trend=trend, damped_trend=(ETS_TREN == "damped")).fit(optimized=True)
     mean = res.forecast(h)
     sd = np.std(res.resid, ddof=1)
     se = sd * np.sqrt(np.arange(1, h + 1))
@@ -595,7 +790,7 @@ def m_ets(y, X, h):
 
 
 def m_theta(y, X, h):
-    res = ThetaModel(y.values, period=4, deseasonalize=False).fit()
+    res = ThetaModel(isi_krisis(y).values, period=4, deseasonalize=False).fit()
     mean = np.asarray(res.forecast(h))
     pi = np.asarray(res.prediction_intervals(h, alpha=1 - CI))
     return dict(mean=mean, lo=pi[:, 0], hi=pi[:, 1], info="Theta (theta = 2, tanpa deseasonalisasi)")
@@ -606,7 +801,7 @@ def _forecast_exog(Xc, h):
     periode normal (bukan rata-rata yang tertarik oleh anjloknya 2020)."""
     if ARIMAX_PROYEKSI_INDIKATOR == "rata2":
         return pd.DataFrame({c: np.repeat(Xc[c].iloc[-4:].mean(), h) for c in Xc.columns})
-    dcols = [c for c in ("D_PANDEMI", "D_REBOUND") if c in DUM.columns and DUM.loc[Xc.index, c].sum() > 0]
+    dcols = [c for c in DUM.columns if c.startswith("D_K") and DUM.loc[Xc.index, c].sum() > 0]
     ex = DUM.loc[Xc.index, dcols].values if dcols else None
     ex_f = np.zeros((h, len(dcols))) if dcols else None
     out = {}
@@ -620,9 +815,9 @@ def _forecast_exog(Xc, h):
 
 def _pilih_indikator(y, X):
     """Indikator ARIMAX: korelasi tertinggi (default tanpa periode pandemi & rebound), di atas ambang minimum."""
-    ok = [normal(p) for p in y.index] if ARIMAX_PILIH_TANPA_PANDEMI else [True] * len(y)
-    kor = X[ok].corrwith(y[ok]).abs().dropna().sort_values(ascending=False)
-    sel = list(kor[kor >= ARIMAX_KORELASI_MIN].index[:ARIMAX_JUMLAH_INDIKATOR])
+    kor = _korelasi_normal(y, X) if ARIMAX_PILIH_TANPA_PANDEMI else X.corrwith(y).abs().dropna().sort_values(ascending=False)
+    k = min(ARIMAX_JUMLAH_INDIKATOR, max(1, len(y) // 10))   # data pendek: indikator lebih sedikit
+    sel = list(kor[kor >= ARIMAX_KORELASI_MIN].index[:k])
     return sel or list(kor.index[:1])
 
 
@@ -631,7 +826,7 @@ def m_arimax(y, X, h):
     d_tr, d_fc = dummies(y.index, h)
     ex_tr = stack(X[sel].values, d_tr)
     ex_fc = stack(_forecast_exog(X[sel], h).values, d_fc)
-    res, order = _best_arima(y, exog=ex_tr, max_pq=ARIMAX_MAX_PQ)
+    res, order = _best_arima(y, exog=ex_tr, max_pq=int(ARIMAX_MAX_PQ))
     fc = res.get_forecast(h, exog=ex_fc)
     ci = fc.conf_int(alpha=1 - CI)
     return dict(mean=fc.predicted_mean, lo=ci[:, 0], hi=ci[:, 1], res=res,
@@ -639,21 +834,29 @@ def m_arimax(y, X, h):
 
 
 def m_var(y, X, h):
-    data = pd.concat([y, X], axis=1)[VAR_VARS]
+    vv = pilih_var(y, X)
+    data = pd.concat([y, X], axis=1)[vv]
     d_tr, d_fc = dummies(y.index, h)
     model = VAR(data.values, exog=d_tr)
-    p = max(1, int(model.select_order(maxlags=VAR_MAXLAG).aic))
+    maxlag = int(min(2, max(1, (len(y) - 8) // (2 * len(vv)))))   # lag maksimum 2, lebih kecil bila data pendek
+    if not _auto(VAR_MAXLAG):
+        maxlag = max(1, min(int(VAR_MAXLAG), (len(y) - 4) // (len(vv) + 1)))
+    try:
+        p = max(1, int(model.select_order(maxlags=maxlag).aic))
+    except Exception:
+        p = 1
     res = model.fit(p)
     mean, lo, hi = res.forecast_interval(data.values[-p:], steps=h, alpha=1 - CI, exog_future=d_fc)
-    return dict(mean=mean[:, 0], lo=lo[:, 0], hi=hi[:, 0], res=res, info=f"VAR({p}) {' + '.join(VAR_VARS)}")
+    return dict(mean=mean[:, 0], lo=lo[:, 0], hi=hi[:, 0], res=res, info=f"VAR({p}) {' + '.join(vv)}")
 
 
 def m_bvar(y, X, h):
     """VAR Bayesian dengan prior Minnesota. Tiap koefisien 'ditarik' ke prior: lag-1 variabel sendiri = 0.8
     (yoy persisten), koefisien lain = 0. Konstanta & dummy pandemi tanpa prior (bebas)."""
-    data = pd.concat([y, X], axis=1)[VAR_VARS].values
+    vv = pilih_var(y, X)
+    data = pd.concat([y, X], axis=1)[vv].values
     T, nv = data.shape
-    p = BVAR_LAG
+    p = (2 if T >= 24 else 1) if str(BVAR_LAG).lower() == "otomatis" else int(BVAR_LAG)
     d_tr, d_fc = dummies(y.index, h)
     nd = 0 if d_tr is None else d_tr.shape[1]
 
@@ -686,53 +889,63 @@ def m_bvar(y, X, h):
         z = regresor(np.array(hist), len(hist), d_fc[k] if nd else None)
         hist.append(z @ B)
     mean = np.array(hist[T:])[:, 0]
-    return dict(mean=mean, lo=None, hi=None, info=f"BVAR({p}) Minnesota, ketatan {BVAR_KETATAN}: {' + '.join(VAR_VARS)}")
+    return dict(mean=mean, lo=None, hi=None, info=f"BVAR({p}) Minnesota, ketatan {BVAR_KETATAN}: {' + '.join(vv)}")
 
 
 def _direct_ml(y, X, h, make_model):
     """Satu model per horizon; fitur diambil h triwulan sebelumnya, jadi indikator tidak perlu diproyeksi.
-    Dummy pandemi & variabel kalender dipakai pada periode sasaran (sudah diketahui di muka)."""
+    Variabel kalender dipakai pada periode sasaran (sudah diketahui di muka). Baris yang menyentuh rentang krisis
+    tidak dipakai melatih (bila sisa data cukup)."""
     feats = pd.concat([y.rename("y_lag"), y.shift(1).rename("y_lag2"), X], axis=1)
     dcols = [c for c in DUM.columns if DUM.loc[y.index, c].abs().sum() > 0]
     preds = []
     for k in range(1, h + 1):
         Xk = pd.concat([feats.shift(k), DUM.loc[y.index, dcols]], axis=1)
         dat = pd.concat([Xk, y.rename("target")], axis=1).dropna()
-        m = make_model()
+        dk = list(dcols)
+        if PAKAI_DUMMY_PANDEMI and KRISIS:
+            # latih hanya pada baris yang target DAN fitur lag-nya di luar rentang krisis; dummy krisis jadi tidak perlu
+            ok = [normal(p) and normal(p - k) and normal(p - k - 1) for p in dat.index]
+            if sum(ok) >= 8:
+                dk = [c for c in dcols if not c.startswith("D_K")]
+                dat = dat.loc[ok, [c for c in dat.columns if c not in dcols or c in dk]]
+        m = make_model(len(dat))
         m.fit(dat.drop(columns="target").values, dat["target"].values)
         x_new = pd.concat([feats.iloc[[-1]].reset_index(drop=True),
-                           DUM.loc[[y.index[-1] + k], dcols].reset_index(drop=True)], axis=1)
+                           DUM.loc[[y.index[-1] + k], dk].reset_index(drop=True)], axis=1)
         preds.append(m.predict(x_new.values)[0])
     return dict(mean=np.array(preds), lo=None, hi=None)
 
 
 def m_ridge(y, X, h):
-    return _direct_ml(y, X, h, lambda: make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-2, 3, 30))))
+    return _direct_ml(y, X, h, lambda n: make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-2, 3, 30))))
 
 
 def m_enet(y, X, h):
-    return _direct_ml(y, X, h, lambda: make_pipeline(
-        StandardScaler(), ElasticNetCV(l1_ratio=[.2, .5, .8, 1.0], cv=4, max_iter=20000, random_state=SEED)))
+    return _direct_ml(y, X, h, lambda n: make_pipeline(   # jumlah lipatan CV menyesuaikan jumlah data
+        StandardScaler(), ElasticNetCV(l1_ratio=[.2, .5, .8, 1.0], cv=int(max(2, min(4, n // 5))),
+                                       max_iter=20000, random_state=SEED)))
 
 
 def m_faktor(y, X, h):
     """Indikator diringkas menjadi FAKTOR_JUMLAH faktor (PCA), lalu dipakai sebagai fitur regresi direct."""
-    k = min(FAKTOR_JUMLAH, X.shape[1])
+    k = min(FAKTOR_JUMLAH, X.shape[1], max(1, len(y) // 12))   # data pendek: faktor lebih sedikit
     pca = make_pipeline(StandardScaler(), PCA(n_components=k))
     F = pd.DataFrame(pca.fit_transform(X.values), index=X.index, columns=[f"F{i + 1}" for i in range(k)])
-    r = _direct_ml(y, F, h, lambda: LinearRegression())
+    r = _direct_ml(y, F, h, lambda n: LinearRegression())
     var = pca.named_steps["pca"].explained_variance_ratio_.sum()
     r["info"] = f"{k} faktor PCA (menjelaskan {var:.0%} variasi indikator) + lag target"
     return r
 
 
 def m_rf(y, X, h):
-    return _direct_ml(y, X, h, lambda: RandomForestRegressor(n_estimators=int(RF_POHON), max_depth=int(RF_KEDALAMAN),
+    return _direct_ml(y, X, h, lambda n: RandomForestRegressor(n_estimators=int(RF_POHON), max_depth=int(RF_KEDALAMAN),
                                                              min_samples_leaf=int(RF_MIN_DAUN), random_state=SEED))
 
 
 def m_gbr(y, X, h):
-    return _direct_ml(y, X, h, lambda: GradientBoostingRegressor(n_estimators=int(GB_POHON), learning_rate=float(GB_LEARNING_RATE), max_depth=int(GB_KEDALAMAN),
+    return _direct_ml(y, X, h, lambda n: GradientBoostingRegressor(n_estimators=int(GB_POHON), learning_rate=float(GB_LEARNING_RATE),
+                                                                 max_depth=int(GB_KEDALAMAN),
                                                                  subsample=0.8, random_state=SEED))
 
 
@@ -766,7 +979,7 @@ def m_sarima_musiman(y, X, h):
     hi = np.array([(v / base.loc[p - 4] - 1) * 100 for p, v in zip(fut, lvl_hi)])
     return dict(mean=mean, lo=lo, hi=hi, res=res, level=True,
                 info=f"SARIMA{order}x{sorder[:3]}4 pada log {TARGET_LEVEL}"
-                     f"{' + kalender' if PAKAI_EFEK_KALENDER else ''}{' + dummy pandemi' if PAKAI_DUMMY_PANDEMI else ''}")
+                     f"{' + kalender' if PAKAI_EFEK_KALENDER else ''}{' + dummy krisis' if PAKAI_DUMMY_PANDEMI else ''}")
 
 
 def m_ets_musiman(y, X, h):
@@ -774,8 +987,8 @@ def m_ets_musiman(y, X, h):
     supaya pola musiman tidak rusak; level pascapandemi tetap memakai data aktual."""
     L = _level_train(y)
     lg = np.log(L).copy()
-    if PAKAI_DUMMY_PANDEMI:
-        a1, b2 = _awal_krisis, _akhir_krisis
+    if PAKAI_DUMMY_PANDEMI and SPAN_KRISIS:
+        a1, b2 = SPAN_KRISIS[0], SPAN_KRISIS[-1]
         pre = lg.loc[:a1 - 1]
         if len(pre) >= 8:
             g = (pre - pre.shift(4)).dropna().iloc[-4:].mean()
@@ -817,7 +1030,8 @@ for o in origins:
     h_eval = min(H, n - 1 - o)
     for name, fn in METHODS.items():
         try:
-            r = rapikan(y_tr.iloc[-1], fn(y_tr, X_tr, H), name)
+            r0 = fn(y_tr, X_tr, H)
+            r = rapikan(y_tr.iloc[-1], r0, name)
         except Exception as e:
             print(f"  {name} gagal di {y_tr.index[-1]}: {e}")
             continue
@@ -825,6 +1039,7 @@ for o in origins:
             bt_rows.append({
                 "Metode": name, "Origin": str(y_tr.index[-1]), "Periode": str(y_all.index[o + k]), "h": k,
                 "Aktual": y_all.iloc[o + k], "Prediksi": float(np.asarray(r["mean"])[k - 1]),
+                "Prediksi mentah": float(np.asarray(r0["mean"])[k - 1]),
                 "Lower": None if r["lo"] is None else float(np.asarray(r["lo"])[k - 1]),
                 "Upper": None if r["hi"] is None else float(np.asarray(r["hi"])[k - 1]),
                 "Aktual origin": y_tr.iloc[-1],
@@ -832,27 +1047,77 @@ for o in origins:
     print(f"  selesai: data s.d. {y_tr.index[-1]}")
 
 bt = pd.DataFrame(bt_rows)
+if bt.empty:
+    stop("Semua metode gagal di backtest. Biasanya karena data terlalu pendek: mundurkan DATA_MULAI, tambah data, "
+         "atau aktifkan hanya metode sederhana (Naive, Rata-rata 8Q, ARIMA, ETS, Theta).")
 bt["Error"] = bt["Aktual"] - bt["Prediksi"]
-rmse_fn = lambda e: np.sqrt(np.mean(e ** 2))
+bt["Error naive"] = bt["Aktual"] - bt["Aktual origin"]       # pembanding random walk
+rmse_fn = lambda e: np.sqrt(np.mean(np.asarray(e, dtype=float) ** 2))
+comp = [m for m in comp if m in set(bt.Metode)]               # metode yang gagal di semua titik uji dikeluarkan
+USE_ENS = PAKAI_ENSEMBLE and len(comp) >= 2
 
-W = pd.Series(dtype=float)
-if USE_ENS:
-    rmse_comp = bt[bt.Metode.isin(comp)].groupby("Metode")["Error"].apply(rmse_fn).sort_values()
-    if ENSEMBLE_CARA == "top":
-        rmse_comp = rmse_comp.iloc[:max(2, ENSEMBLE_TOP)]
-    W = (1 / rmse_comp) / (1 / rmse_comp).sum()
-    if ENSEMBLE_CARA == "median":
-        W = pd.Series(1 / len(rmse_comp), index=rmse_comp.index)     # hanya untuk informasi
-    piv = bt[bt.Metode.isin(comp)].pivot_table(index=["Origin", "Periode", "h"], columns="Metode", values="Prediksi")
-    if ENSEMBLE_CARA == "median":
-        ens = piv[W.index].median(axis=1).rename("Prediksi").reset_index()
+
+def hitung_bobot(sub):
+    """Bobot Ensemble dari baris backtest `sub`. Metode dengan RMSE > ENSEMBLE_BATAS_RMSE x RMSE random walk
+    disaring (bila masih tersisa minimal 2 metode). Return (bobot, daftar metode yang disaring)."""
+    rm = sub.groupby("Metode")["Error"].apply(rmse_fn)
+    rw = rmse_fn(sub.drop_duplicates(["Origin", "Periode", "h"])["Error naive"])
+    nt = sub.groupby("Metode").size()
+    kurang = sorted(nt[nt < 0.5 * nt.max()].index)      # titik uji terlalu sedikit (sering gagal): tidak sebanding
+    if len(rm) - len(kurang) >= 2:
+        rm = rm.drop(kurang)
     else:
-        ens = piv[W.index].mul(W, axis=1).sum(axis=1).rename("Prediksi").reset_index()
-    ref = bt.drop_duplicates(["Origin", "Periode", "h"])[["Origin", "Periode", "h", "Aktual", "Aktual origin"]]
+        kurang = []
+    keluar = []
+    if ENSEMBLE_SARING and np.isfinite(rw) and rw > 0:
+        keluar = sorted(rm[rm > ENSEMBLE_BATAS_RMSE * rw].index)
+        if len(rm) - len(keluar) >= 2:
+            rm = rm.drop(keluar)
+        else:
+            keluar = []
+    keluar = sorted(set(keluar) | set(kurang))
+    rm = rm.sort_values()
+    if ENSEMBLE_CARA == "top":
+        rm = rm.iloc[:max(2, ENSEMBLE_TOP)]
+    if ENSEMBLE_CARA == "median":
+        return pd.Series(1 / len(rm), index=rm.index), keluar
+    return (1 / rm) / (1 / rm).sum(), keluar
+
+
+def gabung(P, w):
+    """Gabungkan prediksi (kolom = metode). Metode yang kosong/gagal tidak dihitung sebagai nol:
+    bobot dinormalkan ulang atas metode yang tersedia."""
+    cols = [m for m in w.index if m in P.columns]
+    P, w = P[cols], w[cols]
+    if ENSEMBLE_CARA == "median":
+        return P.median(axis=1)
+    return P.mul(w, axis=1).sum(axis=1, min_count=1) / P.notna().mul(w, axis=1).sum(axis=1)
+
+
+W, DISARING = pd.Series(dtype=float), []
+if USE_ENS:
+    b_comp = bt[bt.Metode.isin(comp)].copy()
+    b_comp["_per"] = pd.PeriodIndex(b_comp["Periode"], freq="Q")
+    W, DISARING = hitung_bobot(b_comp)                           # bobot final: seluruh backtest
+    piv = b_comp.pivot_table(index=["Origin", "Periode", "h"], columns="Metode", values="Prediksi")
+    piv_raw = b_comp.pivot_table(index=["Origin", "Periode", "h"], columns="Metode", values="Prediksi mentah")
+    ens_parts = []
+    for o in sorted(set(b_comp["Origin"])):
+        # bobot di titik uji ini hanya dari error yang SUDAH terealisasi sebelum titik itu (tanpa bocoran)
+        hist = b_comp[b_comp["_per"] <= pd.Period(o, "Q")]
+        cukup = len(hist) and hist.groupby("Metode").size().min() >= 4 and hist["Metode"].nunique() >= 2
+        w_o = hitung_bobot(hist)[0] if cukup else pd.Series(1 / len(comp), index=comp)
+        Po, Ro = piv.xs(o, level="Origin", drop_level=False), piv_raw.xs(o, level="Origin", drop_level=False)
+        ens_parts.append(pd.DataFrame({"Prediksi": gabung(Po, w_o), "Prediksi mentah": gabung(Ro, w_o)}))
+    ens = pd.concat(ens_parts).reset_index()
+    ref = bt.drop_duplicates(["Origin", "Periode", "h"])[["Origin", "Periode", "h", "Aktual", "Aktual origin", "Error naive"]]
     ens = ens.merge(ref, on=["Origin", "Periode", "h"])
     ens["Metode"] = "Ensemble"; ens["Lower"] = None; ens["Upper"] = None
     ens["Error"] = ens["Aktual"] - ens["Prediksi"]
     bt = pd.concat([bt, ens[bt.columns]], ignore_index=True)
+    if DISARING:
+        print(f"  Tidak ikut Ensemble (RMSE > {ENSEMBLE_BATAS_RMSE:g} x random walk / titik uji terlalu sedikit): "
+              f"{', '.join(DISARING)}")
 
 # Mode level: qtq prediksi di backtest (dari yoy prediksi + level aktual s.d. origin)
 if MODE_LEVEL:
@@ -869,9 +1134,10 @@ if MODE_LEVEL:
 # =============================================================================
 # 5. METRIK ERROR
 # =============================================================================
-mase_scale = y_all.iloc[: n - JUMLAH_UJI_BACKTEST].diff().abs().mean()
-# pembanding untuk Theil's U & DM: random walk (dihitung langsung, tidak tergantung metode Naive aktif)
-bt["Error naive"] = bt["Aktual"] - bt["Aktual origin"]
+_dtr = y_all.iloc[: n - JUMLAH_UJI_BACKTEST].diff()
+_okm = [normal(p) and normal(p - 1) for p in _dtr.index]
+mase_scale = _dtr[_okm].abs().mean() if sum(_okm) >= 6 else _dtr.abs().mean()   # skala MASE dari periode normal
+# pembanding untuk Theil's U & DM: random walk (kolom "Error naive", tidak tergantung metode Naive aktif)
 
 
 def dm_test(e1, e2, h=1):
@@ -893,7 +1159,8 @@ for m, g in bt.groupby("Metode"):
     g1 = g[g.h == 1]
     dm, dmp = (np.nan, np.nan) if m == "Naive" else dm_test(g1["Error"], g1["Error naive"])
     row = {
-        "Metode": m, "RMSE": rmse_fn(e), "MAE": np.mean(np.abs(e)), "ME (bias)": np.mean(e),
+        "Metode": m, "RMSE": rmse_fn(e), "RMSE tanpa batas yoy": rmse_fn(g["Aktual"] - g["Prediksi mentah"]),
+        "MAE": np.mean(np.abs(e)), "ME (bias)": np.mean(e),
         "sMAPE (%)": np.mean(2 * np.abs(e) / (np.abs(a) + np.abs(p))) * 100,
         "MASE": np.mean(np.abs(e)) / mase_scale,
         "Theil's U": rmse_fn(e) / rmse_fn(g["Error naive"].values),
@@ -904,14 +1171,19 @@ for m, g in bt.groupby("Metode"):
     if MODE_LEVEL:
         row["RMSE qtq"] = rmse_fn((g["qtq Aktual"] - g["qtq Prediksi"]).values)
     met_rows.append(row)
-metrik = pd.DataFrame(met_rows).sort_values("RMSE").reset_index(drop=True)
+metrik = pd.DataFrame(met_rows)
+# metode yang titik ujinya kurang dari separuh (sering gagal) diurutkan paling bawah: RMSE-nya tidak sebanding
+metrik["_kurang"] = metrik["Jumlah titik uji"] < 0.5 * metrik["Jumlah titik uji"].max()
+metrik = metrik.sort_values(["_kurang", "RMSE"]).drop(columns="_kurang").reset_index(drop=True)
 metrik.insert(0, "Peringkat", range(1, len(metrik) + 1))
 rmse_h = bt.groupby(["Metode", "h"])["Error"].apply(rmse_fn).unstack()
 rmse_h.columns = [f"h={c}" for c in rmse_h.columns]
 rmse_h = rmse_h.loc[metrik["Metode"]]
+peringkat_h = rmse_h.rank(axis=0, method="min").astype("Int64")      # peringkat tiap metode per horizon
 print("\nMETRIK BACKTEST (urut RMSE terkecil)")
 print(metrik[["Peringkat", "Metode", "RMSE", "MAE", "ME (bias)", "Theil's U", "Akurasi arah (%)"]
              + (["RMSE qtq"] if MODE_LEVEL else [])].round(3).to_string(index=False))
+print("Kolom 'RMSE tanpa batas yoy' = error bila proyeksi tidak dipangkas BATAS_PERUBAHAN_YOY.")
 
 # =============================================================================
 # 6. PROYEKSI FINAL
@@ -928,7 +1200,12 @@ def se_empiris(name):
 
 final, diag_rows, spesifikasi, dipangkas = {}, [], {}, {}
 for name, fn in METHODS.items():
-    r = rapikan(y_all.iloc[-1], fn(y_all, X_all, H), name)
+    try:
+        r = rapikan(y_all.iloc[-1], fn(y_all, X_all, H), name)
+    except Exception as e:                      # satu metode gagal tidak menghentikan notebook
+        print(f"  {name} gagal di proyeksi final, dikeluarkan dari hasil: {e}")
+        alasan_lewat[name] = f"gagal di proyeksi final: {e}"
+        continue
     dipangkas[name] = r.get("dipangkas", 0)
     mean = np.asarray(r["mean"], dtype=float)
     if r["lo"] is None:
@@ -967,20 +1244,24 @@ for name, fn in METHODS.items():
                       "Residual normal": "Ya" if jb_p > 0.05 else "Tidak"})
 diagnostik = pd.DataFrame(diag_rows)
 
-if USE_ENS:
+W = W[[m for m in W.index if m in final]]
+if USE_ENS and len(W) >= 1:
+    W = W / W.sum()
+    ens_mean = gabung(pd.DataFrame({m: final[m]["Proyeksi"] for m in W.index}), W)
     if ENSEMBLE_CARA == "median":
-        ens_mean = pd.concat([final[m]["Proyeksi"] for m in W.index], axis=1).median(axis=1)
         spesifikasi["Ensemble"] = "Median dari: " + ", ".join(W.index)
     else:
-        ens_mean = sum(final[m]["Proyeksi"] * W[m] for m in W.index)
         spesifikasi["Ensemble"] = (f"{'Top ' + str(len(W)) + ', ' if ENSEMBLE_CARA == 'top' else ''}bobot inverse-RMSE: "
                                    + ", ".join(f"{k} {v:.0%}" for k, v in W.sort_values(ascending=False).items()))
+    if DISARING:
+        spesifikasi["Ensemble"] += (f". Tidak ikut (RMSE backtest > {ENSEMBLE_BATAS_RMSE:g} x random walk, "
+                                    "atau titik uji kurang dari separuh karena sering gagal): " + ", ".join(DISARING))
     se_e = se_empiris("Ensemble")
     final["Ensemble"] = pd.DataFrame({"Proyeksi": ens_mean, "Lower": ens_mean - Z * se_e,
                                       "Upper": ens_mean + Z * se_e}, index=fc_periods)
     dipangkas["Ensemble"] = 0
 
-ORDER = list(metrik["Metode"])
+ORDER = [m for m in metrik["Metode"] if m in final]
 BEST = ORDER[0]
 
 # ---- Penyesuaian judgment (add-factor) ----------------------------------------------
@@ -1118,7 +1399,8 @@ PAL = ["#0f6b5c", "#c2410c", "#2563eb", "#9333ea", "#ca8a04", "#db2777", "#0891b
        "#1e3a8a", "#b91c1c", "#0d9488", "#7c2d12", "#4d7c0f", "#a21caf", "#475569"]
 COL = {m: PAL[i % len(PAL)] for i, m in enumerate(ORDER)}
 xh, xf = y_all.index.to_timestamp(), fc_periods.to_timestamp()
-g_start = to_period(GRAFIK_MULAI, "GRAFIK_MULAI")
+g_start = (max(y_all.index[0], p_sampai - 19) if str(GRAFIK_MULAI).lower() == "otomatis"
+           else to_period(GRAFIK_MULAI, "GRAFIK_MULAI"))
 mask = y_all.index >= g_start
 OUT = FOLDER_OUTPUT
 
@@ -1263,14 +1545,16 @@ penjelasan = {
     "ETS": "Exponential smoothing pada yoy. Tanpa tren yang jelas di data, hasilnya mendekati datar di level terakhir.",
     "Theta": "Garis tren jangka panjang digabung exponential smoothing. Sederhana, sering sulit dikalahkan untuk data pendek.",
     "ARIMAX": "ARIMA + indikator pendukung. Indikator dipilih dari korelasi di luar masa pandemi, lalu diproyeksi dengan AR(1) + dummy pandemi sehingga kembali ke rata-rata periode normal. Proyeksi bergerak landai menuju rata-rata jangka panjang.",
-    "VAR": "Target dan indikator saling memengaruhi. Proyeksi bergerak landai menuju keseimbangan.",
+    "VAR": "Target dan indikator saling memengaruhi. Indikator dipilih otomatis dari korelasi di luar masa pandemi (atau sesuai VAR_INDIKATOR). Proyeksi bergerak landai menuju keseimbangan.",
     "BVAR": "VAR Bayesian (prior Minnesota). Koefisien ditarik ke nilai wajar sehingga tidak meledak walau data pendek.",
     "Ridge": "Regresi linier memakai indikator h triwulan sebelumnya + variabel kalender periode sasaran.",
     "Elastic Net": "Regresi seperti Ridge, tetapi indikator yang lemah otomatis diberi koefisien nol (seleksi indikator).",
     "Faktor (PCA)": "Semua indikator diringkas menjadi beberapa faktor bersama (PCA), lalu faktor dipakai memproyeksi target. Cocok bila indikator banyak tapi data pendek.",
     "Random Forest": "Machine learning berbasis pohon keputusan. Hasil bisa naik turun mengikuti pola indikator.",
     "Gradient Boosting": "Machine learning berbasis pohon keputusan bertahap. Hasil bisa naik turun mengikuti pola indikator.",
-    "SARIMA Musiman": "Memodelkan log PDRB ADHK level dengan komponen musiman triwulanan (menangkap Q4/Nataru/HBKN) + porsi hari Ramadan, puncak Lebaran, dan Idul Adha per triwulan. Yoy dan qtq diturunkan dari level.",
+    "SARIMA Musiman": "Memodelkan log PDRB ADHK level dengan komponen musiman triwulanan"
+                      + (f" + porsi hari {', '.join(_kal_aktif)} per triwulan" if PAKAI_EFEK_KALENDER and _kal_aktif else "")
+                      + ". Efek Nataru/HBKN (selalu di Q4) tertangkap komponen musiman Q4. Yoy dan qtq diturunkan dari level.",
     "ETS Musiman": "Holt-Winters pada log PDRB ADHK level (tren damped + musiman). Pola musiman diperbarui bertahap mengikuti data terbaru. Yoy dan qtq diturunkan dari level.",
     "Ensemble": {"inverse-rmse": "Gabungan semua metode non-benchmark, bobot lebih besar untuk error backtest lebih kecil.",
                  "top": f"Gabungan {ENSEMBLE_TOP} metode non-benchmark terbaik, bobot sesuai error backtest.",
@@ -1280,38 +1564,42 @@ catatan = pd.DataFrame([{"Metode": m, "Peringkat": ORDER.index(m) + 1, "Spesifik
                          "Penjelasan": penjelasan.get(m, "")} for m in ORDER])
 
 pengaturan = pd.DataFrame({"Pengaturan": [
-    "FILE_DATA", "SHEET_DATA", "TARGET", "Mode", "DATA_MULAI", "DATA_SAMPAI", "PROYEKSI_SAMPAI", "INDIKATOR_DIPAKAI",
+    "FILE_DATA", "SHEET_DATA", "TARGET", "Mode", "Sumber yoy target", "DATA_MULAI", "DATA_SAMPAI", "PROYEKSI_SAMPAI", "INDIKATOR_DIPAKAI",
     "METODE aktif", "PAKAI_ENSEMBLE", "ENSEMBLE_CARA", "ETS_TREN", "ARIMAX_JUMLAH_INDIKATOR", "ARIMAX_KORELASI_MIN",
-    "ARIMAX_PILIH_TANPA_PANDEMI", "ARIMAX_PROYEKSI_INDIKATOR", "VAR/BVAR (variabel)", "BVAR_LAG / BVAR_KETATAN",
+    "ARIMAX_PILIH_TANPA_PANDEMI", "ARIMAX_PROYEKSI_INDIKATOR", "VAR_INDIKATOR", "VAR/BVAR (variabel)", "BVAR_LAG / BVAR_KETATAN",
     "FAKTOR_JUMLAH", "Batas perubahan yoy antarkuartal",
-    "PAKAI_DUMMY_PANDEMI", "PERIODE_PANDEMI", "PERIODE_REBOUND", "PAKAI_EFEK_KALENDER", "KALENDER_DI_MODEL_YOY",
+    "PAKAI_DUMMY_PANDEMI", "Triwulan krisis (dummy)", "Deteksi krisis", "PAKAI_EFEK_KALENDER", "KALENDER_DI_MODEL_YOY",
     "EFEK_TRIWULAN_YOY",
-    "Jendela Lebaran", "JUMLAH_UJI_BACKTEST", "SELANG_KEPERCAYAAN", "PENYESUAIAN (pp yoy)",
-    "BERSIHKAN_OUTLIER", "BATAS_OUTLIER", "Metode terbaik (RMSE)", "Pertumbuhan tahunan"],
+    "Jendela Lebaran", "Ramadan / Idul Fitri / Idul Adha", "Jendela Idul Adha", "JUMLAH_UJI_BACKTEST", "SELANG_KEPERCAYAAN", "PENYESUAIAN (pp yoy)",
+    "BERSIHKAN_OUTLIER", "BATAS_OUTLIER", "Metode terbaik (RMSE)", "Pertumbuhan tahunan",
+    "Metode dilewati", "Penyesuaian otomatis", "POLA_MUSIMAN_MULAI"],
     "Nilai": [FILE_DATA, SHEET_DATA, f"{TARGET} ({LABEL[TARGET]})",
-              f"Level ({TARGET_LEVEL})" if MODE_LEVEL else "Yoy", str(df_raw.index[0]), str(df_raw.index[-1]),
+              f"Level ({TARGET_LEVEL})" if MODE_LEVEL else "Yoy", SUMBER_YOY, str(df_raw.index[0]), str(df_raw.index[-1]),
               str(p_proj), ", ".join(EXOG_ALL), ", ".join(aktif), str(USE_ENS), ENSEMBLE_CARA, ETS_TREN,
               ARIMAX_JUMLAH_INDIKATOR, ARIMAX_KORELASI_MIN, str(ARIMAX_PILIH_TANPA_PANDEMI), ARIMAX_PROYEKSI_INDIKATOR,
+              "otomatis" if VAR_INDIKATOR == "otomatis" else ", ".join(VAR_INDIKATOR),
               ", ".join(VAR_VARS), f"{BVAR_LAG} / {BVAR_KETATAN}", FAKTOR_JUMLAH,
-              "tidak ada" if BATAS_YOY is None else f"{BATAS_YOY:.2f} pp ({BATAS_PERUBAHAN_YOY})", str(PAKAI_DUMMY_PANDEMI), " s.d. ".join(PERIODE_PANDEMI),
-              " s.d. ".join(PERIODE_REBOUND), str(PAKAI_EFEK_KALENDER), str(KALENDER_DI_MODEL_YOY),
+              "tidak ada" if BATAS_YOY is None else f"{BATAS_YOY:.2f} pp ({BATAS_PERUBAHAN_YOY})", str(PAKAI_DUMMY_PANDEMI), ringkas_periode(KRISIS),
+              INFO_KRISIS, str(PAKAI_EFEK_KALENDER), str(KALENDER_DI_MODEL_YOY),
               str(EFEK_TRIWULAN_YOY),
               f"Ramadan {RAMADAN_HARI} hari; Lebaran H-{LEBARAN_HARI_SEBELUM} s.d. H+{LEBARAN_HARI_SESUDAH}",
+              f"{PAKAI_RAMADAN} / {PAKAI_IDUL_FITRI} / {PAKAI_IDUL_ADHA}",
+              f"H-{IDUL_ADHA_HARI_SEBELUM} s.d. H+{IDUL_ADHA_HARI_SESUDAH}",
               JUMLAH_UJI_BACKTEST, f"{SELANG_KEPERCAYAAN}%",
               ", ".join(f"{k}: {v:+.2f}" for k, v in PENYESUAIAN.items()) or "-",
               str(BERSIHKAN_OUTLIER), BATAS_OUTLIER, BEST,
-              "Dari jumlah level PDRB 4 triwulan" if MODE_LEVEL else "Rata-rata yoy triwulanan (pendekatan)"]})
+              "Dari jumlah level PDRB 4 triwulan" if MODE_LEVEL else "Rata-rata yoy triwulanan (pendekatan)",
+              "; ".join(f"{m_} ({a_})" for m_, a_ in alasan_lewat.items()) or "-",
+              "; ".join(CATATAN_AUTO + PERINGATAN_DATA) or "-", POLA_MUSIMAN_MULAI if MODE_LEVEL else "-"]})
 
 _tambah = [
-    ("PAKAI_REBOUND", str(PAKAI_REBOUND)),
-    ("Ramadan / Lebaran / Idul Adha", f"{PAKAI_RAMADAN} / {PAKAI_LEBARAN} / {PAKAI_IDULADHA}"),
-    ("Jendela Idul Adha", f"H-{IDULADHA_HARI_SEBELUM} s.d. H+{IDULADHA_HARI_SESUDAH}"),
-    ("OUTLIER_MANUAL", "-" if OUTLIER_MANUAL is None else (", ".join(f"{k}: {', '.join(v)}" for k, v in OUTLIER_MANUAL.items() if v) or "tidak ada")),
+    ("OUTLIER_MANUAL", "-" if OUTLIER_MANUAL is None else (", ".join(f"{k}: {', '.join(map(str, v))}" for k, v in OUTLIER_MANUAL.items() if v) or "tidak ada")),
     ("OUTLIER_CARA", OUTLIER_CARA),
     ("ARIMA_MAX_PQ / ARIMAX_MAX_PQ / VAR_MAXLAG", f"{ARIMA_MAX_PQ} / {ARIMAX_MAX_PQ} / {VAR_MAXLAG}"),
     ("RF (pohon / kedalaman / min daun)", f"{RF_POHON} / {RF_KEDALAMAN} / {RF_MIN_DAUN}"),
     ("GB (pohon / learning rate / kedalaman)", f"{GB_POHON} / {GB_LEARNING_RATE} / {GB_KEDALAMAN}"),
     ("RATA2_JUMLAH_TRIWULAN", RATA2_JUMLAH_TRIWULAN),
+    ("ENSEMBLE_SARING / BATAS_RMSE", f"{ENSEMBLE_SARING} / {ENSEMBLE_BATAS_RMSE}"),
 ]
 pengaturan = pd.concat([pengaturan, pd.DataFrame(_tambah, columns=["Pengaturan", "Nilai"])], ignore_index=True)
 pengaturan["Nilai"] = pengaturan["Nilai"].astype(str)
@@ -1338,6 +1626,7 @@ sheets.update({
     "Proyeksi_yoy_Model_Murni": (proj_murni.set_axis(proj_murni.index.astype(str)).round(3), True),
     "Metrik_Error_Backtest": (metrik.round(4), False),
     "RMSE_per_Horizon": (rmse_h.round(4), True),
+    "Peringkat_per_Horizon": (peringkat_h, True),
     "Detail_Backtest": (bt.drop(columns="Error naive").round(4), False),
     "Diagnostik_InSample": (diagnostik.round(4), False),
     "Validasi_Data": (validasi.round(4), False),

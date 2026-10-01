@@ -71,7 +71,7 @@ def buat_template():
         ("5. Isi pertumbuhan dalam % yoy (contoh: 5,12 berarti tumbuh 5,12%).", False),
         ("6. Kolom level PDRB (Rp juta) opsional. Bila diisi, aplikasi bisa memakai mode level (pola musiman Lebaran dan akhir tahun).", False),
         ("7. Sel yang belum ada datanya dibiarkan KOSONG, jangan diisi 0 atau tanda \"-\".", False),
-        ("8. Minimal 24 triwulan data. Disarankan mulai 2016Q1.", False),
+        ("8. Disarankan minimal 30 triwulan (mis. mulai 2016Q1). Data lebih pendek tetap bisa diproses, dengan peringatan.", False),
         ("9. Baris untuk periode yang belum terjadi boleh dibiarkan kosong.", False),
         ("", False),
         ("Sheet \"Contoh\" berisi contoh pengisian dengan angka ilustrasi (bukan data resmi).", False),

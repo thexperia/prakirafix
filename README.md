@@ -1,7 +1,7 @@
 # Proyeksi PDRB: Web App Forecasting Indikator Regional
 
 Aplikasi web (Streamlit) untuk memproyeksi pertumbuhan PDRB dengan 14 metode + Ensemble.
-Logika proyeksi sama persis dengan notebook Colab (`core/proyeksi_pdrb.py`).
+Logika proyeksi sama persis dengan notebook Colab **v5** (`core/proyeksi_pdrb.py`).
 
 ## Fitur
 - Login 5 akun (`rachmad`, `febiola`, `torkis`, `shania`, `sigit`; password awal `123456`), bisa ganti password di menu Akun
@@ -9,7 +9,11 @@ Logika proyeksi sama persis dengan notebook Colab (`core/proyeksi_pdrb.py`).
 - Dataset tersimpan per akun, bisa dipakai lagi di sesi berikutnya
 - Pilih target, kolom level (opsional), periode, indikator (lengkap dengan korelasi), metode, add-factor
 - Detail run lengkap seperti Excel Colab + unduh Excel dan grafik; satu grafik semua metode dengan pilihan metode yang disorot, plus rangkuman model
-- Pengaturan penanda pandemi (bulan), outlier per indikator (dipilih sendiri), Ramadan/Lebaran/Idul Adha (H- dan H+), batas lompatan on/off, dan mode advanced per metode
+- Penanda krisis otomatis dari data (atau manual per bulan), tiap triwulan krisis diberi dummy sendiri
+- Outlier per indikator dengan batas dari periode normal (yang di periode normal otomatis dicentang), Ramadan / Idul Fitri / Idul Adha on-off terpisah (H- dan H+), batas lompatan on/off
+- VAR/BVAR: indikator otomatis (korelasi tanpa krisis) atau pilih sendiri; Ensemble dengan saringan metode lemah
+- Jumlah backtest dan parameter model menyesuaikan panjang data otomatis; data pendek tetap jalan dengan peringatan
+- Mode advanced per metode (order ARIMA, lag VAR/BVAR, jumlah backtest: "otomatis" atau angka)
 - Impor hasil run dari Google Colab (.zip) langsung ke riwayat, tanpa run ulang
 - Beranda berisi dashboard dan riwayat run; tooltip ⓘ dan halaman Glosarium untuk semua istilah
 
@@ -36,6 +40,12 @@ streamlit run app.py
 Tanpa pengaturan Supabase, aplikasi otomatis memakai penyimpanan lokal (folder `local_data/`).
 
 ---
+
+## Update dari versi sebelumnya (v5)
+Cukup unggah ulang file-file berikut ke GitHub (Add file lalu Upload files, otomatis menimpa), lalu tunggu Streamlit memuat ulang:
+`core/proyeksi_pdrb.py`, `core/engine.py`, `core/validasi.py`, `core/ui.py`, `core/impor.py`, `core/template.py`, `core/glosarium.json`,
+`views/jalankan.py`, `views/riwayat.py`, `views/beranda.py`, `views/data.py`. Secrets Supabase dan database tidak perlu diubah.
+Run lama tetap terbaca; tombol "Jalankan ulang" pada run lama otomatis memakai penanda krisis manual sesuai periode pandemi lamanya.
 
 ## Langkah deploy
 

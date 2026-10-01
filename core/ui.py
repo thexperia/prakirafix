@@ -29,23 +29,46 @@ h1, h2, h3, h4 { font-family: 'Rubik', sans-serif !important; color: #1C2B33; }
 [data-testid="stSidebar"] button, [data-testid="stSidebar"] button * { color: #16303A !important; }
 [data-testid="stSidebar"] a[aria-current="page"] { background: #1F4450; border-radius: 8px; }
 .eyebrow { font-size: 13px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #B83C0A; margin-bottom: -6px; }
-.kpi { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 14px 18px; }
-.kpi .l { font-size: 13px; font-weight: 700; color: #56636B; }
-.kpi, .kpi * { word-break: normal !important; overflow-wrap: normal !important; hyphens: none; }
-.kpi .l { line-height: 1.3; }
-.kpi .v { font-family: 'Rubik', sans-serif; font-size: clamp(20px, 2.1vw, 28px); font-weight: 700; color: #1C2B33; white-space: nowrap; }
-.kpi .s { line-height: 1.35; }
+/* kartu angka: tinggi seragam, isi boleh turun baris di spasi (tidak tembus kotak), ada jarak ke elemen bawahnya */
+.kpi { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 14px 16px; min-height: 128px;
+       box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; overflow: hidden; }
+.kpi .l { font-size: 13px; font-weight: 700; color: #56636B; line-height: 1.3; }
+.kpi, .kpi * { word-break: normal !important; overflow-wrap: break-word !important; hyphens: none; }
+.kpi .v { font-family: 'Rubik', sans-serif; font-size: clamp(19px, 1.9vw, 26px); font-weight: 700; color: #1C2B33;
+          line-height: 1.2; white-space: normal; }
+.kpi .v.sm { font-size: clamp(16px, 1.45vw, 21px); }
+.kpi .v.xs { font-size: clamp(14px, 1.15vw, 17px); }
+.kpi .s { line-height: 1.35; margin-top: auto; }
+.kpi.kpi-mini { min-height: 104px; }
+.step { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 12px 16px; min-height: 64px; box-sizing: border-box;
+        display: flex; align-items: center; gap: 10px; font-family: 'Rubik', sans-serif; font-weight: 700; font-size: 16px; color: #1C2B33;
+        line-height: 1.25; margin-bottom: 12px; }
+.step .n { flex: 0 0 30px; height: 30px; border-radius: 999px; background: #0F6B5C; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+/* tombol: label boleh turun baris, tidak terpotong "..." */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button { min-height: 42px; height: auto; padding-top: 6px; padding-bottom: 6px; }
+.stButton button p, .stDownloadButton button p, .stFormSubmitButton button p,
+.stButton button div, .stDownloadButton button div { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; line-height: 1.25; }
+/* jarak antarblok & isi kotak bergaris */
+[data-testid="stVerticalBlockBorderWrapper"] { margin-bottom: 6px; }
+[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 4px 4px; }
+.gap-s { height: 8px; } .gap-m { height: 18px; }
+[data-testid="stCaptionContainer"] { line-height: 1.5; }
+[data-testid="stMarkdownContainer"] small { line-height: 1.45; }
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] { margin-bottom: 4px; }
 /* pilihan dropdown boleh turun baris agar label panjang tetap terbaca */
 ul[role="listbox"] li, ul[role="listbox"] li * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; line-height: 1.35; }
 div[data-baseweb="popover"] ul[role="listbox"] { max-width: min(640px, 92vw); }
 [data-baseweb="select"] div[title] { text-overflow: ellipsis; }
 [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
-.ringkas { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 14px 18px; line-height: 1.55; }
+.ringkas { background: #FFFDF8; border: 1px solid #E6DDCB; border-radius: 14px; padding: 12px 16px; line-height: 1.55; margin: 2px 0 12px;
+           overflow-wrap: break-word; }
 .ringkas b { color: #0F6B5C; }
 .kpi .s { font-size: 13px; color: #56636B; }
 .chip { display: inline-block; padding: 3px 10px; margin: 2px 4px 2px 0; border-radius: 999px; background: #F1E6D2; font-size: 13px; font-weight: 700; color: #1C2B33; }
-.msg-err { background: #FDECEA; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
-.msg-warn { background: #FFF4DB; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+.msg-err { background: #FDECEA; border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; line-height: 1.5; overflow-wrap: break-word; }
+.msg-warn { background: #FFF4DB; border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; line-height: 1.5; overflow-wrap: break-word; }
+.msg-info { background: #E7F3F0; border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; line-height: 1.5; overflow-wrap: break-word; }
+.msg-info b { color: #0F6B5C; }
 .msg-err b { color: #B42318; } .msg-warn b { color: #8A5A00; }
 </style>
 """
@@ -62,10 +85,17 @@ def header(eyebrow, title, caption=None):
         st.caption(caption)
 
 
-def kpi(col, label, value, sub="", tip=""):
+def kpi(col, label, value, sub="", tip="", mini=False):
+    """Kartu angka. Ukuran huruf nilai mengecil otomatis bila teksnya panjang, supaya tidak tembus kotak."""
     t = f' <span title="{tip}" style="cursor:help;color:{TEAL}">ⓘ</span>' if tip else ""
-    col.markdown(f'<div class="kpi"><div class="l">{label}{t}</div><div class="v">{value}</div><div class="s">{sub}</div></div>',
-                 unsafe_allow_html=True)
+    v = "-" if value is None else str(value)
+    ukuran = "" if len(v) <= 10 else ("sm" if len(v) <= 18 else "xs")
+    col.markdown(f'<div class="kpi{" kpi-mini" if mini else ""}"><div class="l">{label}{t}</div><div class="v {ukuran}">{v}</div>'
+                 f'<div class="s">{sub or "&nbsp;"}</div></div>', unsafe_allow_html=True)
+
+
+def gap(size="m"):
+    st.markdown(f'<div class="gap-{size}"></div>', unsafe_allow_html=True)
 
 
 def fmt(x, d=2, pct=False):
